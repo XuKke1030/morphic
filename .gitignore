@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# production
+build/
+dist/
+
+# environment
+.env
+.env*.local
+!.env.local.example
+
+# logs
+*.log
+.server-*.log
+
+# TypeScript
+*.tsbuildinfo
+
+# local tooling
+.claude/
+.vscode/
+.idea/
