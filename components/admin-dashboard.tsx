@@ -1,8 +1,25 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 
-import { AlertTriangle, Download, FileText, LogOut, Plus, Search, Upload, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  Download,
+  FileText,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Search,
+  Upload,
+  X
+} from 'lucide-react'
 
 type AdminSection = 'overview' | 'users' | 'questions' | 'data' | 'logs'
 type TopicKey = 'grid' | 'population' | 'traffic'
@@ -71,6 +88,34 @@ type GridImportError = {
   rawData: string
 }
 
+type SyncTask = {
+  taskId: number
+  provider: string
+  syncType: string
+  status: string
+  message: string
+  successCount: number
+  failureCount: number
+  skippedCount: number
+  startedAt: number
+  finishedAt: number
+  createTime: number
+  updateTime: number
+}
+
+type SyncLog = {
+  logId: number
+  taskId: number
+  provider: string
+  syncType: string
+  externalId: string
+  localId: string
+  action: string
+  status: string
+  message: string
+  createTime: number
+}
+
 type QuestionCandidate = {
   id: number
   topic: TopicKey
@@ -119,7 +164,8 @@ const sectionTitles: Record<AdminSection, string> = {
 
 const sectionSubtitles: Partial<Record<AdminSection, string>> = {
   users: '用户来自统一认证系统，在此配置各用户的数据访问白名单。',
-  questions: '配置用户不标准提问到标准问题的映射，以及期望的回答内容（后两项选填）。',
+  questions:
+    '配置用户不标准提问到标准问题的映射，以及期望的回答内容（后两项选填）。',
   logs: '记录问答问数系统的用户查询日志，以及管理后台的操作记录。'
 }
 
@@ -151,9 +197,31 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers
     }
   })
-  const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null
+  const payload = (await response
+    .json()
+    .catch(() => null)) as ApiEnvelope<T> | null
   if (!response.ok || payload?.code !== 0) {
     throw new Error(payload?.message || '后台接口请求失败')
+  }
+  return payload.data as T
+}
+
+async function qaSyncFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api/chatdb/admin/sync/${path}`, {
+    cache: 'no-store',
+    ...init,
+    headers: {
+      ...(init?.body && !(init.body instanceof FormData)
+        ? { 'Content-Type': 'application/json' }
+        : {}),
+      ...init?.headers
+    }
+  })
+  const payload = (await response
+    .json()
+    .catch(() => null)) as ApiEnvelope<T> | null
+  if (!response.ok || payload?.code !== 0) {
+    throw new Error(payload?.message || '同步接口请求失败')
   }
   return payload.data as T
 }
@@ -201,7 +269,33 @@ function statusLabel(status: string) {
   return map[status] || status || '-'
 }
 
-function userDisplayName(user: Pick<AdminUser, 'username' | 'displayName'> | string) {
+function syncTypeLabel(syncType: string) {
+  const map: Record<string, string> = {
+    knowledge_bases: '知识库同步',
+    documents: '文档同步',
+    permissions: '权限同步',
+    grid_data: '网格数据同步',
+    traffic_data: '车流数据同步',
+    population_data: '人流数据同步'
+  }
+  return map[syncType] || syncType || '-'
+}
+
+function syncStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    pending: '待执行',
+    running: '执行中',
+    success: '成功',
+    skipped: '已跳过',
+    partial_failed: '部分失败',
+    failed: '失败'
+  }
+  return map[status] || status || '-'
+}
+
+function userDisplayName(
+  user: Pick<AdminUser, 'username' | 'displayName'> | string
+) {
   if (typeof user === 'string') {
     return mockNames[user] || user
   }
@@ -281,7 +375,11 @@ function MetricCard({
       <div className="mt-2 text-[46px] font-bold leading-none tracking-normal text-[#05070a]">
         {value}
       </div>
-      <div className={danger ? 'mt-3 text-lg text-[#ff3b30]' : 'mt-3 text-lg text-[#12b35c]'}>
+      <div
+        className={
+          danger ? 'mt-3 text-lg text-[#ff3b30]' : 'mt-3 text-lg text-[#12b35c]'
+        }
+      >
         {footnote}
       </div>
     </div>
@@ -294,7 +392,13 @@ function SourceStatusCard({ source }: { source: DataSource }) {
       <div className="text-xl font-bold text-[#05070a]">
         {sourceLabels[source.type] || source.name}
       </div>
-      <div className={source.enabled ? 'text-xl font-bold text-[#09a64f]' : 'text-xl font-bold text-[#8a9099]'}>
+      <div
+        className={
+          source.enabled
+            ? 'text-xl font-bold text-[#09a64f]'
+            : 'text-xl font-bold text-[#8a9099]'
+        }
+      >
         {source.enabled ? '接入正常' : '已关闭'}
       </div>
     </div>
@@ -307,6 +411,8 @@ export function AdminDashboard() {
   const [questions, setQuestions] = useState<ExampleQuestion[]>([])
   const [dataSources, setDataSources] = useState<DataSource[]>([])
   const [imports, setImports] = useState<GridImport[]>([])
+  const [syncTasks, setSyncTasks] = useState<SyncTask[]>([])
+  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([])
   const [candidates, setCandidates] = useState<QuestionCandidate[]>([])
   const [search, setSearch] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
@@ -315,10 +421,13 @@ export function AdminDashboard() {
   const [newQuestion, setNewQuestion] = useState(emptyQuestion)
   const [questionTopic, setQuestionTopic] = useState<TopicKey>('grid')
   const [questionModalOpen, setQuestionModalOpen] = useState(false)
-  const [questionModalTab, setQuestionModalTab] = useState<'manual' | 'batch'>('manual')
+  const [questionModalTab, setQuestionModalTab] = useState<'manual' | 'batch'>(
+    'manual'
+  )
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [importErrors, setImportErrors] = useState<GridImportError[]>([])
   const [activeImportId, setActiveImportId] = useState<number | null>(null)
+  const [activeSyncTaskId, setActiveSyncTaskId] = useState<number | null>(null)
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -326,19 +435,27 @@ export function AdminDashboard() {
     setError('')
     setLoading(true)
     try {
-      const [userData, questionData, sourceData, importData, candidateData] =
-        await Promise.all([
-          adminFetch<{ list: AdminUser[] }>('users'),
-          adminFetch<{ list: ExampleQuestion[] }>('example-questions'),
-          adminFetch<{ list: DataSource[] }>('data-sources'),
-          adminFetch<{ list: GridImport[] }>('grid-data/imports'),
-          adminFetch<{ list: QuestionCandidate[] }>('question-candidates')
-        ])
+      const [
+        userData,
+        questionData,
+        sourceData,
+        importData,
+        candidateData,
+        syncData
+      ] = await Promise.all([
+        adminFetch<{ list: AdminUser[] }>('users'),
+        adminFetch<{ list: ExampleQuestion[] }>('example-questions'),
+        adminFetch<{ list: DataSource[] }>('data-sources'),
+        adminFetch<{ list: GridImport[] }>('grid-data/imports'),
+        adminFetch<{ list: QuestionCandidate[] }>('question-candidates'),
+        qaSyncFetch<{ list: SyncTask[] }>('status?limit=8')
+      ])
       setUsers(userData.list || [])
       setQuestions(questionData.list || [])
       setDataSources(sourceData.list || [])
       setImports(importData.list || [])
       setCandidates(candidateData.list || [])
+      setSyncTasks(syncData.list || [])
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '数据加载失败')
     } finally {
@@ -356,7 +473,7 @@ export function AdminDashboard() {
     const keyword = search.trim().toLowerCase()
     if (!keyword) return users
     return users.filter(
-        user =>
+      user =>
         user.username.toLowerCase().includes(keyword) ||
         user.department.toLowerCase().includes(keyword) ||
         userDisplayName(user).includes(keyword)
@@ -369,7 +486,9 @@ export function AdminDashboard() {
   )
 
   const latestImport = imports[0]
-  const failedImports = imports.filter(item => item.failedRows > 0 || item.status === 'failed')
+  const failedImports = imports.filter(
+    item => item.failedRows > 0 || item.status === 'failed'
+  )
   const failedQueryCount = Math.max(
     candidates.filter(item => item.status === 'pending').length,
     failedImports.length
@@ -424,11 +543,11 @@ export function AdminDashboard() {
     }
   }
 
-async function saveUserPermissions(
-  user: AdminUser,
-  permissions: TopicPermission[],
-  qaPermissions: KnowledgePermission[]
-) {
+  async function saveUserPermissions(
+    user: AdminUser,
+    permissions: TopicPermission[],
+    qaPermissions: KnowledgePermission[]
+  ) {
     const key = `user-permissions-${user.userId}`
     setSavingId(key)
     try {
@@ -504,9 +623,12 @@ async function saveUserPermissions(
   async function deleteQuestion(questionId: number) {
     setSavingId(`question-delete-${questionId}`)
     try {
-      await adminFetch<Record<string, never>>(`example-questions/${questionId}`, {
-        method: 'DELETE'
-      })
+      await adminFetch<Record<string, never>>(
+        `example-questions/${questionId}`,
+        {
+          method: 'DELETE'
+        }
+      )
       setQuestions(prev => prev.filter(item => item.id !== questionId))
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '删除问题失败')
@@ -532,7 +654,9 @@ async function saveUserPermissions(
         prev.map(item => (item.type === source.type ? data.item : item))
       )
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '数据源保存失败')
+      setError(
+        saveError instanceof Error ? saveError.message : '数据源保存失败'
+      )
     } finally {
       setSavingId(null)
     }
@@ -581,7 +705,55 @@ async function saveUserPermissions(
       setImportErrors(data.list || [])
       setError('')
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '失败明细加载失败')
+      setError(
+        saveError instanceof Error ? saveError.message : '失败明细加载失败'
+      )
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function triggerQaSync(syncPath: string) {
+    const key = `qa-sync-${syncPath}`
+    setSavingId(key)
+    try {
+      const data = await qaSyncFetch<SyncTask>(syncPath, { method: 'POST' })
+      setSyncTasks(prev =>
+        [data, ...prev.filter(item => item.taskId !== data.taskId)].slice(0, 8)
+      )
+      setActiveSyncTaskId(data.taskId)
+      const logs = await qaSyncFetch<{ list: SyncLog[] }>(
+        `tasks/${data.taskId}/logs`
+      )
+      setSyncLogs(logs.list || [])
+      setError('')
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : '同步任务触发失败'
+      )
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function loadSyncLogs(taskId: number) {
+    if (activeSyncTaskId === taskId) {
+      setActiveSyncTaskId(null)
+      setSyncLogs([])
+      return
+    }
+    setSavingId(`sync-logs-${taskId}`)
+    try {
+      const logs = await qaSyncFetch<{ list: SyncLog[] }>(
+        `tasks/${taskId}/logs`
+      )
+      setActiveSyncTaskId(taskId)
+      setSyncLogs(logs.list || [])
+      setError('')
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : '同步日志加载失败'
+      )
     } finally {
       setSavingId(null)
     }
@@ -609,7 +781,9 @@ async function saveUserPermissions(
         <nav className="flex-1 py-6">
           {menuGroups.map(group => (
             <div key={group.title} className="mb-7">
-              <div className="px-7 text-lg font-bold text-[#c3c7ce]">{group.title}</div>
+              <div className="px-7 text-lg font-bold text-[#c3c7ce]">
+                {group.title}
+              </div>
               <div className="mt-3">
                 {group.items.map(item => {
                   const active = activeSection === item.key
@@ -656,7 +830,10 @@ async function saveUserPermissions(
       <main className="min-w-0 flex-1 overflow-y-auto">
         <header className="flex h-[74px] items-center justify-between border-b border-[#dddfe4] bg-white px-10">
           <div className="text-[22px] text-[#a6abb3]">
-            首页 / <span className="font-bold text-[#05070a]">{sectionTitles[activeSection]}</span>
+            首页 /{' '}
+            <span className="font-bold text-[#05070a]">
+              {sectionTitles[activeSection]}
+            </span>
           </div>
           <div className="flex items-center gap-5">
             <span className="rounded-full bg-[#111] px-4 py-1 text-lg font-bold leading-none text-white">
@@ -688,7 +865,9 @@ async function saveUserPermissions(
                 {sectionTitles[activeSection]}
               </h1>
               {sectionSubtitles[activeSection] ? (
-                <p className="mt-2 text-xl text-[#8a9099]">{sectionSubtitles[activeSection]}</p>
+                <p className="mt-2 text-xl text-[#8a9099]">
+                  {sectionSubtitles[activeSection]}
+                </p>
               ) : null}
             </div>
           ) : null}
@@ -730,10 +909,13 @@ async function saveUserPermissions(
             <DataPanel
               dataSources={dataSources}
               imports={imports}
+              syncTasks={syncTasks}
+              syncLogs={syncLogs}
               selectedFile={selectedFile}
               savingId={savingId}
               fileInputRef={fileInputRef}
               activeImportId={activeImportId}
+              activeSyncTaskId={activeSyncTaskId}
               importErrors={importErrors}
               onFileChange={file => {
                 setSelectedFile(file)
@@ -743,6 +925,8 @@ async function saveUserPermissions(
               }}
               onToggleSource={toggleDataSource}
               onToggleErrors={loadImportErrors}
+              onTriggerSync={triggerQaSync}
+              onToggleSyncLogs={loadSyncLogs}
             />
           ) : null}
 
@@ -803,7 +987,10 @@ function OverviewPanel({
         {dataSources.some(item => !item.enabled) ? (
           <div className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
             <AlertTriangle className="h-5 w-5 text-[#ff3b30]" />
-            <span>{dataSources.find(item => !item.enabled)?.name || '数据源'}接入中断</span>
+            <span>
+              {dataSources.find(item => !item.enabled)?.name || '数据源'}
+              接入中断
+            </span>
             <span className="text-[#a6abb3]">10分钟前</span>
             <X className="h-4 w-4 text-[#a6abb3]" />
           </div>
@@ -812,7 +999,9 @@ function OverviewPanel({
           <div className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
             <span className="font-bold text-[#ff3b30]">!</span>
             <span>网格数据上传部分失败</span>
-            <span className="text-[#a6abb3]">{formatTime(failedImports[0].createTime)}</span>
+            <span className="text-[#a6abb3]">
+              {formatTime(failedImports[0].createTime)}
+            </span>
             <X className="h-4 w-4 text-[#a6abb3]" />
           </div>
         ) : null}
@@ -905,7 +1094,8 @@ function UsersPanel({
                 <td className="truncate px-5 py-5">{userDisplayName(user)}</td>
                 <td className="px-5 py-5">
                   <div className="flex flex-wrap gap-2">
-                    {user.permissions.filter(permission => permission.enabled).length ? (
+                    {user.permissions.filter(permission => permission.enabled)
+                      .length ? (
                       user.permissions
                         .filter(permission => permission.enabled)
                         .map(permission => (
@@ -920,7 +1110,9 @@ function UsersPanel({
                 </td>
                 <td className="px-5 py-5">
                   <div className="flex flex-wrap gap-2">
-                    {user.qaPermissions?.filter(permission => permission.enabled).length ? (
+                    {user.qaPermissions?.filter(
+                      permission => permission.enabled
+                    ).length ? (
                       user.qaPermissions
                         ?.filter(permission => permission.enabled)
                         .map(permission => (
@@ -933,7 +1125,9 @@ function UsersPanel({
                     )}
                   </div>
                 </td>
-                <td className="px-5 py-5 text-[#a0a6af]">{formatTime(user.updateTime, true)}</td>
+                <td className="px-5 py-5 text-[#a0a6af]">
+                  {formatTime(user.updateTime, true)}
+                </td>
                 <td className="px-5 py-5">
                   <button
                     type="button"
@@ -950,11 +1144,21 @@ function UsersPanel({
 
         <div className="mt-7 flex items-center justify-end gap-2 text-lg text-[#a0a6af]">
           <span>共 {users.length} 条</span>
-          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">«</button>
-          <button className="rounded-lg bg-[#111] px-4 py-2 text-white">1</button>
-          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-[#333]">2</button>
-          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-[#333]">3</button>
-          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">»</button>
+          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">
+            «
+          </button>
+          <button className="rounded-lg bg-[#111] px-4 py-2 text-white">
+            1
+          </button>
+          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-[#333]">
+            2
+          </button>
+          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-[#333]">
+            3
+          </button>
+          <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">
+            »
+          </button>
         </div>
       </div>
     </section>
@@ -1069,7 +1273,9 @@ function ExampleQuestionTable({
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => onEdit({ ...question, enabled: !question.enabled })}
+                    onClick={() =>
+                      onEdit({ ...question, enabled: !question.enabled })
+                    }
                     className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-base font-bold"
                   >
                     编辑
@@ -1099,32 +1305,193 @@ function ExampleQuestionTable({
 function DataPanel({
   dataSources,
   imports,
+  syncTasks,
+  syncLogs,
   selectedFile,
   savingId,
   fileInputRef,
   activeImportId,
+  activeSyncTaskId,
   importErrors,
   onFileChange,
   onToggleSource,
-  onToggleErrors
+  onToggleErrors,
+  onTriggerSync,
+  onToggleSyncLogs
 }: {
   dataSources: DataSource[]
   imports: GridImport[]
+  syncTasks: SyncTask[]
+  syncLogs: SyncLog[]
   selectedFile: File | null
   savingId: string | null
   fileInputRef: React.RefObject<HTMLInputElement>
   activeImportId: number | null
+  activeSyncTaskId: number | null
   importErrors: GridImportError[]
   onFileChange: (value: File | null) => void
   onToggleSource: (source: DataSource, enabled: boolean) => void
   onToggleErrors: (importId: number) => void
+  onTriggerSync: (syncPath: string) => void
+  onToggleSyncLogs: (taskId: number) => void
 }) {
   const population = dataSources.find(source => source.type === 'population')
   const traffic = dataSources.find(source => source.type === 'traffic')
   const latestImport = imports[0]
+  const syncActions = [
+    {
+      path: 'knowledge-bases',
+      label: '知识库',
+      description: '同步 AIDGP 知识库目录'
+    },
+    { path: 'documents', label: '文档', description: '同步文档元数据与正文' },
+    { path: 'grid-data', label: '网格', description: '同步网格数据批次' },
+    { path: 'traffic-data', label: '车流', description: '同步车流数据批次' },
+    {
+      path: 'population-data',
+      label: '人流',
+      description: '格式未配置时仅记录跳过'
+    }
+  ]
 
   return (
     <div className="space-y-6">
+      <section className="rounded-[18px] border border-[#e1e3e8] bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#eceef2] px-7 py-6">
+          <div>
+            <h2 className="text-2xl font-bold">AIDGP 同步</h2>
+            <p className="mt-2 text-lg text-[#8a9099]">
+              当前接入 Mock 同步流程，可先验证任务状态、成功失败数量和日志明细。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onTriggerSync('knowledge-bases')}
+            disabled={savingId?.startsWith('qa-sync-')}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#111] px-5 py-3 text-base font-bold text-white disabled:cursor-not-allowed disabled:bg-[#b8bdc7]"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${savingId?.startsWith('qa-sync-') ? 'animate-spin' : ''}`}
+            />
+            一键同步知识库
+          </button>
+        </div>
+
+        <div className="grid gap-4 px-7 py-6 lg:grid-cols-5">
+          {syncActions.map(action => {
+            const running = savingId === `qa-sync-${action.path}`
+            return (
+              <button
+                key={action.path}
+                type="button"
+                onClick={() => onTriggerSync(action.path)}
+                disabled={!!savingId?.startsWith('qa-sync-')}
+                className="min-h-[110px] rounded-[14px] border border-[#e1e3e8] bg-[#fafafa] p-4 text-left transition hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xl font-bold">{action.label}</span>
+                  <RefreshCw
+                    className={`h-5 w-5 text-[#8a9099] ${running ? 'animate-spin' : ''}`}
+                  />
+                </div>
+                <p className="mt-3 text-base leading-6 text-[#7b818c]">
+                  {action.description}
+                </p>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="border-t border-[#eceef2] px-7 py-6">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-2xl font-bold">同步任务</h3>
+            <span className="text-base text-[#8a9099]">
+              最近 {syncTasks.length} 条
+            </span>
+          </div>
+          <div className="divide-y divide-[#eceef2]">
+            {syncTasks.length === 0 ? (
+              <div className="rounded-xl bg-[#f7f7f8] p-5 text-lg text-[#8a9099]">
+                暂无同步任务，点击上方按钮后会显示执行结果。
+              </div>
+            ) : (
+              syncTasks.map(task => (
+                <Fragment key={task.taskId}>
+                  <button
+                    type="button"
+                    onClick={() => onToggleSyncLogs(task.taskId)}
+                    className="grid w-full gap-4 py-4 text-left lg:grid-cols-[1.1fr_1fr_1.6fr_160px]"
+                  >
+                    <div>
+                      <div className="text-xl font-bold">
+                        {syncTypeLabel(task.syncType)}
+                      </div>
+                      <div className="mt-1 text-base text-[#8a9099]">
+                        #{task.taskId} · {task.provider || 'mock'}
+                      </div>
+                    </div>
+                    <div>
+                      <Tag
+                        danger={task.status === 'failed'}
+                        muted={task.status === 'skipped'}
+                      >
+                        {syncStatusLabel(task.status)}
+                      </Tag>
+                      <div className="mt-2 text-base text-[#8a9099]">
+                        成功 {task.successCount} / 失败 {task.failureCount} /
+                        跳过 {task.skippedCount}
+                      </div>
+                    </div>
+                    <div className="text-base leading-6 text-[#555c66]">
+                      {task.message || '-'}
+                    </div>
+                    <div className="text-right text-base text-[#8a9099]">
+                      {formatTime(task.finishedAt || task.updateTime, true)}
+                    </div>
+                  </button>
+                  {activeSyncTaskId === task.taskId ? (
+                    <div className="mb-4 rounded-xl bg-[#f7f7f8] p-4">
+                      {syncLogs.length === 0 ? (
+                        <div className="text-lg text-[#8a9099]">
+                          暂无日志明细
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {syncLogs.map(log => (
+                            <div
+                              key={log.logId}
+                              className="grid gap-3 rounded-lg bg-white p-4 text-base lg:grid-cols-[120px_160px_1fr]"
+                            >
+                              <Tag
+                                danger={log.status === 'failed'}
+                                muted={log.status === 'skipped'}
+                              >
+                                {syncStatusLabel(log.status)}
+                              </Tag>
+                              <div className="text-[#555c66]">
+                                {log.action || '-'}
+                              </div>
+                              <div>
+                                <div className="font-bold text-[#111]">
+                                  {log.externalId || log.localId || '同步明细'}
+                                </div>
+                                <div className="mt-1 text-[#7b818c]">
+                                  {log.message || '-'}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </Fragment>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
       <div className="grid gap-5 xl:grid-cols-2">
         {[population, traffic].filter(Boolean).map(source => (
           <div
@@ -1132,7 +1499,9 @@ function DataPanel({
             className="flex h-[120px] items-center justify-between rounded-[18px] border border-[#e1e3e8] bg-white px-7"
           >
             <div>
-              <h2 className="text-2xl font-bold">{sourceLabels[source!.type]}</h2>
+              <h2 className="text-2xl font-bold">
+                {sourceLabels[source!.type]}
+              </h2>
               <p className="mt-5 text-lg text-[#a0a6af]">
                 最后同步 {formatTime(source!.latestSync, true)}
               </p>
@@ -1154,15 +1523,21 @@ function DataPanel({
           <div className="grid rounded-[16px] bg-[#f7f7f8] px-7 py-5 text-lg xl:grid-cols-4">
             <div>
               <div className="text-[#a0a6af]">最近同步时间</div>
-              <div className="mt-2 text-xl font-bold">{formatTime(latestImport?.createTime, true)}</div>
+              <div className="mt-2 text-xl font-bold">
+                {formatTime(latestImport?.createTime, true)}
+              </div>
             </div>
             <div>
               <div className="text-[#a0a6af]">数据文件</div>
-              <div className="mt-2 text-xl font-bold">{latestImport?.fileName || '-'}</div>
+              <div className="mt-2 text-xl font-bold">
+                {latestImport?.fileName || '-'}
+              </div>
             </div>
             <div>
               <div className="text-[#a0a6af]">数据条数</div>
-              <div className="mt-2 text-xl font-bold">{latestImport?.successRows || 0} 条</div>
+              <div className="mt-2 text-xl font-bold">
+                {latestImport?.successRows || 0} 条
+              </div>
             </div>
             <div>
               <div className="text-[#a0a6af]">同步状态</div>
@@ -1181,8 +1556,12 @@ function DataPanel({
               accept=".xlsx,.csv,.xls"
             />
             <Upload className="mb-2 h-7 w-7 text-[#b3b7bf]" />
-            <span>{selectedFile ? selectedFile.name : '点击上传 或 拖拽文件至此处'}</span>
-            <span className="mt-2 text-base text-[#b3b7bf]">.csv / .xlsx / .xls · 最大 50MB</span>
+            <span>
+              {selectedFile ? selectedFile.name : '点击上传 或 拖拽文件至此处'}
+            </span>
+            <span className="mt-2 text-base text-[#b3b7bf]">
+              .csv / .xlsx / .xls · 最大 50MB
+            </span>
           </label>
 
           {savingId === 'grid-upload' ? (
@@ -1199,8 +1578,8 @@ function DataPanel({
                   <div>
                     <div className="text-xl">{item.fileName}</div>
                     <div className="mt-1 text-lg text-[#a0a6af]">
-                      {formatTime(item.createTime, true)} · {item.successRows} 条
-                      {item.failedRows ? ` · 失败 ${item.failedRows} 条` : ''}
+                      {formatTime(item.createTime, true)} · {item.successRows}{' '}
+                      条{item.failedRows ? ` · 失败 ${item.failedRows} 条` : ''}
                     </div>
                   </div>
                   <button type="button" onClick={() => onToggleErrors(item.id)}>
@@ -1215,7 +1594,10 @@ function DataPanel({
                       <div className="text-lg text-[#8a9099]">暂无失败明细</div>
                     ) : (
                       importErrors.map(error => (
-                        <div key={error.id} className="py-2 text-base text-[#d93025]">
+                        <div
+                          key={error.id}
+                          className="py-2 text-base text-[#d93025]"
+                        >
                           第 {error.rowIndex} 行：{error.reason}
                         </div>
                       ))
@@ -1234,17 +1616,37 @@ function DataPanel({
 function LogsPanel({ imports }: { imports: GridImport[] }) {
   const [logFilter, setLogFilter] = useState<'all' | 'system' | 'admin'>('all')
   const rows = [
-    ['2024-06-01 09:30', 'zhangsan', '问数查询', '哪个网格的案件影响最大？', '成功'],
-    ['2024-06-01 09:18', 'lisi', '问答查询', '流动人口管理相关政策有哪些？', '成功'],
-    ['2024-06-01 09:10', 'zhaoliu', '问数查询', '今天流动人口有多少人？', '成功'],
+    [
+      '2024-06-01 09:30',
+      'zhangsan',
+      '问数查询',
+      '哪个网格的案件影响最大？',
+      '成功'
+    ],
+    [
+      '2024-06-01 09:18',
+      'lisi',
+      '问答查询',
+      '流动人口管理相关政策有哪些？',
+      '成功'
+    ],
+    [
+      '2024-06-01 09:10',
+      'zhaoliu',
+      '问数查询',
+      '今天流动人口有多少人？',
+      '成功'
+    ],
     ['2024-06-01 09:05', 'chenqi', '问数查询', '近3天车流数据', '失败'],
-    ...imports.slice(0, 2).map(item => [
-      formatTime(item.createTime, true),
-      item.operator || 'admin',
-      '后台操作',
-      `上传网格数据：${item.fileName}`,
-      item.status === 'completed' ? '成功' : '失败'
-    ])
+    ...imports
+      .slice(0, 2)
+      .map(item => [
+        formatTime(item.createTime, true),
+        item.operator || 'admin',
+        '后台操作',
+        `上传网格数据：${item.fileName}`,
+        item.status === 'completed' ? '成功' : '失败'
+      ])
   ]
   const visibleRows = rows.filter(row => {
     if (logFilter === 'all') return true
@@ -1344,10 +1746,16 @@ function LogTable({ rows }: { rows: string[][] }) {
       </table>
       <div className="mt-7 flex items-center justify-end gap-2 text-lg text-[#a0a6af]">
         <span>共 {rows.length} 条</span>
-        <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">«</button>
+        <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">
+          «
+        </button>
         <button className="rounded-lg bg-[#111] px-4 py-2 text-white">1</button>
-        <button className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-[#333]">2</button>
-        <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">»</button>
+        <button className="rounded-lg border border-[#dfe3ea] px-4 py-2 text-[#333]">
+          2
+        </button>
+        <button className="rounded-lg border border-[#dfe3ea] px-4 py-2">
+          »
+        </button>
       </div>
     </>
   )
@@ -1362,7 +1770,10 @@ function UserPermissionModal({
   user: AdminUser
   saving: boolean
   onClose: () => void
-  onSave: (permissions: TopicPermission[], qaPermissions: KnowledgePermission[]) => void
+  onSave: (
+    permissions: TopicPermission[],
+    qaPermissions: KnowledgePermission[]
+  ) => void
 }) {
   const [topicPermissions, setTopicPermissions] = useState<TopicPermission[]>(
     user.permissions
@@ -1426,7 +1837,9 @@ function UserPermissionModal({
             label="问答权限"
             hint="控制用户可访问的知识库，后续新增知识库会在这里继续扩展。"
             open={openSelect === 'qa'}
-            onToggleOpen={() => setOpenSelect(openSelect === 'qa' ? null : 'qa')}
+            onToggleOpen={() =>
+              setOpenSelect(openSelect === 'qa' ? null : 'qa')
+            }
             values={qaPermissions
               .filter(item => item.enabled)
               .map(item => item.name)}
@@ -1532,7 +1945,9 @@ function QuestionModal({
   question: Omit<ExampleQuestion, 'id' | 'updateTime'>
   saving: boolean
   onTabChange: (tab: 'manual' | 'batch') => void
-  onQuestionChange: (question: Omit<ExampleQuestion, 'id' | 'updateTime'>) => void
+  onQuestionChange: (
+    question: Omit<ExampleQuestion, 'id' | 'updateTime'>
+  ) => void
   onClose: () => void
   onSave: () => void
 }) {
@@ -1578,7 +1993,10 @@ function QuestionModal({
               <select
                 value={question.topic}
                 onChange={event =>
-                  onQuestionChange({ ...question, topic: event.target.value as TopicKey })
+                  onQuestionChange({
+                    ...question,
+                    topic: event.target.value as TopicKey
+                  })
                 }
                 className="mt-2 h-[50px] w-full rounded-xl border border-[#dfe3ea] px-5 text-xl"
               >
@@ -1588,22 +2006,40 @@ function QuestionModal({
               </select>
 
               <div className="mt-5 rounded-[16px] border border-[#e1e3e8] px-5 py-5">
-                <div className="mb-4 text-lg font-bold text-[#a0a6af]">第 1 条</div>
-                <label className="text-lg">用户不标准提问 <span className="text-[#ff3b30]">*</span></label>
+                <div className="mb-4 text-lg font-bold text-[#a0a6af]">
+                  第 1 条
+                </div>
+                <label className="text-lg">
+                  用户不标准提问 <span className="text-[#ff3b30]">*</span>
+                </label>
                 <input
                   value={question.question}
-                  onChange={event => onQuestionChange({ ...question, question: event.target.value })}
+                  onChange={event =>
+                    onQuestionChange({
+                      ...question,
+                      question: event.target.value
+                    })
+                  }
                   placeholder="例：今天人流咋样？"
                   className="mt-2 h-[50px] w-full rounded-xl border border-[#dfe3ea] px-5 text-lg"
                 />
-                <label className="mt-5 block text-lg">映射标准问题 <span className="text-[#a0a6af]">（选填）</span></label>
+                <label className="mt-5 block text-lg">
+                  映射标准问题 <span className="text-[#a0a6af]">（选填）</span>
+                </label>
                 <input
                   value={question.description}
-                  onChange={event => onQuestionChange({ ...question, description: event.target.value })}
+                  onChange={event =>
+                    onQuestionChange({
+                      ...question,
+                      description: event.target.value
+                    })
+                  }
                   placeholder="例：今日人流进出统计是多少？"
                   className="mt-2 h-[50px] w-full rounded-xl border border-[#dfe3ea] px-5 text-lg"
                 />
-                <label className="mt-5 block text-lg">期望回答内容 <span className="text-[#a0a6af]">（选填）</span></label>
+                <label className="mt-5 block text-lg">
+                  期望回答内容 <span className="text-[#a0a6af]">（选填）</span>
+                </label>
                 <textarea
                   placeholder="输入希望系统回复的内容..."
                   className="mt-2 h-[84px] w-full rounded-xl border border-[#dfe3ea] px-5 py-3 text-lg"
@@ -1633,7 +2069,9 @@ function QuestionModal({
                 <input type="file" className="hidden" accept=".xlsx,.csv" />
                 <FileText className="mb-4 h-8 w-8 text-[#d8c8e8]" />
                 拖拽文件至此处 或 点击选择
-                <span className="mt-2 text-base text-[#b3b7bf]">.xlsx / .csv · 最大 10MB</span>
+                <span className="mt-2 text-base text-[#b3b7bf]">
+                  .xlsx / .csv · 最大 10MB
+                </span>
               </label>
             </div>
           )}

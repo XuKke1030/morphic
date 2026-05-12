@@ -2265,7 +2265,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
           </button>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
+        <main className="min-h-0 flex-1 overflow-y-scroll px-5 py-6 [scrollbar-gutter:stable]">
           {messages.length === 0 ? (
             <div className="mt-20 text-center">
               <h2 className="text-3xl font-extrabold tracking-normal">
@@ -2299,7 +2299,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
                   className={
                     message.role === 'user'
                       ? 'ml-auto w-fit max-w-[82%] whitespace-pre-wrap break-words rounded-2xl bg-[#484848] px-4 py-3 text-white'
-                      : 'group mr-auto w-fit max-w-[92%] rounded-2xl border border-[#eeeeee] bg-[#fafafa] px-4 py-3 text-[#222]'
+                      : 'group mr-auto w-full max-w-[92%] rounded-2xl border border-[#eeeeee] bg-[#fafafa] px-4 py-3 text-[#222]'
                   }
                 >
                   {message.role === 'assistant' ? (
