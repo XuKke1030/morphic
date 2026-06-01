@@ -6,6 +6,13 @@ import { LockKeyhole, ShieldCheck } from 'lucide-react'
 
 type LoginMode = 'user' | 'admin'
 
+function safeSetItem(key: string, value: string) {
+  try { window.localStorage.setItem(key, value) } catch { /* storage full or private browsing */ }
+}
+function safeGetItem(key: string): string | null {
+  try { return window.localStorage.getItem(key) } catch { return null }
+}
+
 type Props = {
   mode: LoginMode
   children: ReactNode
@@ -41,34 +48,50 @@ export function ChatDbLoginGate({ mode, children }: Props) {
 
   useEffect(() => {
     queueMicrotask(() => {
-      const hasLocalLogin = window.localStorage.getItem(config.storageKey) === '1'
-      const storedName = window.localStorage.getItem(config.usernameKey)
+      const hasLocalLogin = safeGetItem(config.storageKey) === '1'
+      const storedName = safeGetItem(config.usernameKey)
       if (storedName) {
         setUsername(storedName)
       }
-      if (!hasLocalLogin || mode === 'admin') {
-        setLoggedIn(hasLocalLogin)
+      if (!hasLocalLogin) {
+        setLoggedIn(false)
         setReady(true)
         return
       }
-      fetch('/api/chatdb/permissions', { cache: 'no-store' })
-        .then(response => response.json())
+      const verifyUrl = mode === 'admin'
+        ? '/api/chatdb/admin/profile'
+        : '/api/chatdb/permissions'
+      fetch(verifyUrl, { cache: 'no-store', credentials: 'include' })
+        .then(response => {
+          if (!response.ok) throw new Error('unauthorized')
+          return response.json()
+        })
         .then(payload => {
           const data = payload?.data || payload
-          if (data?.authenticated) {
-            setLoggedIn(true)
-            if (data.username) {
-              window.localStorage.setItem(config.usernameKey, data.username)
+          if (mode === 'admin') {
+            const valid = data?.username && data.username !== ''
+            if (valid) {
+              setLoggedIn(true)
+              safeSetItem(config.usernameKey, data.username)
               setUsername(data.username)
+            } else {
+              throw new Error('invalid profile')
             }
           } else {
-            window.localStorage.removeItem(config.storageKey)
-            window.localStorage.removeItem(config.usernameKey)
-            setLoggedIn(false)
+            if (data?.authenticated) {
+              setLoggedIn(true)
+              if (data.username) {
+                safeSetItem(config.usernameKey, data.username)
+                setUsername(data.username)
+              }
+            } else {
+              throw new Error('not authenticated')
+            }
           }
         })
         .catch(() => {
           window.localStorage.removeItem(config.storageKey)
+          window.localStorage.removeItem(config.usernameKey)
           setLoggedIn(false)
         })
         .finally(() => setReady(true))
@@ -89,8 +112,8 @@ export function ChatDbLoginGate({ mode, children }: Props) {
       if (!response.ok || payload?.code !== 0) {
         throw new Error(payload?.message || '登录失败，请检查账号和密码')
       }
-      window.localStorage.setItem(config.storageKey, '1')
-      window.localStorage.setItem(
+      safeSetItem(config.storageKey, '1')
+      safeSetItem(
         config.usernameKey,
         payload?.data?.username || username
       )

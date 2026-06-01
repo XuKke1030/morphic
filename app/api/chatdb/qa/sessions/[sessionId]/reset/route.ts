@@ -15,10 +15,6 @@ export async function POST(
     { method: 'POST' }
   )
 
-  if (!upstream.ok) {
-    return new Response(await upstream.text(), { status: upstream.status })
-  }
-
   return new Response(await upstream.text(), {
     status: upstream.status,
     headers: { 'Content-Type': 'application/json; charset=utf-8' }

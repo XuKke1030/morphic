@@ -21,7 +21,7 @@ import {
   X
 } from 'lucide-react'
 
-type AdminSection = 'overview' | 'users' | 'questions' | 'data' | 'logs'
+type AdminSection = 'overview' | 'users' | 'questions' | 'candidates' | 'data' | 'documents' | 'metrics' | 'logs'
 type TopicKey = 'grid' | 'population' | 'traffic'
 
 type TopicPermission = {
@@ -88,6 +88,15 @@ type GridImportError = {
   rawData: string
 }
 
+type GridImportAudit = {
+  id: number
+  importId: number
+  action: string
+  operator: string
+  detail: string
+  createTime: number
+}
+
 type SyncTask = {
   taskId: number
   provider: string
@@ -114,6 +123,49 @@ type SyncLog = {
   status: string
   message: string
   createTime: number
+}
+
+type TopicKnowledgeBinding = {
+  id: number
+  topic: string
+  knowledgeCode: string
+  knowledgeName: string
+  enabled: boolean
+  createTime: number
+  updateTime: number
+}
+
+type DocumentRelationItem = {
+  id: number
+  fromDocId: number
+  fromDocTitle: string
+  toDocId: number
+  toDocTitle: string
+  relType: string
+  description?: string
+  enabled: boolean
+}
+
+type ComplianceIssue = {
+  documentId: number
+  documentTitle: string
+  issueType: string
+  description: string
+  severity: string
+}
+
+type MetricItem = {
+  id: number
+  topic: string
+  metricName: string
+  displayName: string
+  description: string
+  unit: string
+  dimensions?: string[]
+  defaultThreshold?: number | null
+  thresholdDirection: string
+  chartTypeHint: string
+  isActive: boolean
 }
 
 type QuestionCandidate = {
@@ -149,9 +201,9 @@ const menuGroups: Array<{
 }> = [
   { title: '概览', items: [{ key: 'overview', label: '首页' }] },
   { title: '权限管理', items: [{ key: 'users', label: '用户权限管理' }] },
-  { title: '内容管理', items: [{ key: 'questions', label: '示例问题管理' }] },
+  { title: '内容管理', items: [{ key: 'questions' as AdminSection, label: '示例问题管理' }, { key: 'candidates' as AdminSection, label: '问题沉淀管理' }, { key: 'documents' as AdminSection, label: '文档关联管理' }] },
   { title: '数据接入', items: [{ key: 'data', label: '数据接入管理' }] },
-  { title: '系统', items: [{ key: 'logs', label: '操作日志' }] }
+  { title: '系统', items: [{ key: 'metrics' as AdminSection, label: '指标目录管理' }, { key: 'logs', label: '操作日志' }] }
 ]
 
 const sectionTitles: Record<AdminSection, string> = {
@@ -159,6 +211,9 @@ const sectionTitles: Record<AdminSection, string> = {
   users: '用户权限管理',
   questions: '示例问题管理',
   data: '数据接入管理',
+  candidates: '问题沉淀管理',
+  documents: '文档关联管理',
+  metrics: '指标目录管理',
   logs: '操作日志'
 }
 
@@ -166,6 +221,9 @@ const sectionSubtitles: Partial<Record<AdminSection, string>> = {
   users: '用户来自统一认证系统，在此配置各用户的数据访问白名单。',
   questions:
     '配置用户不标准提问到标准问题的映射，以及期望的回答内容（后两项选填）。',
+  candidates: '审批用户高频问题沉淀为示例问题，被拒绝的候选不会进入示例问题库。',
+  documents: '管理文档间的引用、补充、废止、相关关系，支持自动发现和合规检查。',
+  metrics: '配置车流/人流/网格各类指标的显示名称、阈值、单位和维度，影响快问路由和告警规则。',
   logs: '记录问答问数系统的用户查询日志，以及管理后台的操作记录。'
 }
 
@@ -189,6 +247,7 @@ const mockNames: Record<string, string> = {
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/chatdb/admin/${path}`, {
     cache: 'no-store',
+    credentials: 'include',
     ...init,
     headers: {
       ...(init?.body && !(init.body instanceof FormData)
@@ -209,6 +268,7 @@ async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
 async function qaSyncFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/chatdb/admin/sync/${path}`, {
     cache: 'no-store',
+    credentials: 'include',
     ...init,
     headers: {
       ...(init?.body && !(init.body instanceof FormData)
@@ -386,20 +446,20 @@ function MetricCard({
   )
 }
 
-function SourceStatusCard({ source }: { source: DataSource }) {
+function SourceStatusCard({ source, lastSyncFailed }: { source: DataSource; lastSyncFailed?: boolean }) {
+  const displayStatus = !source.enabled ? '已关闭' : lastSyncFailed ? '同步异常' : '接入正常'
+  const statusColor = !source.enabled
+    ? 'text-[#8a9099]'
+    : lastSyncFailed
+      ? 'text-[#ff3b30]'
+      : 'text-[#09a64f]'
   return (
     <div className="flex h-[76px] items-center justify-between rounded-[16px] border border-[#e1e3e8] bg-white px-7">
       <div className="text-xl font-bold text-[#05070a]">
         {sourceLabels[source.type] || source.name}
       </div>
-      <div
-        className={
-          source.enabled
-            ? 'text-xl font-bold text-[#09a64f]'
-            : 'text-xl font-bold text-[#8a9099]'
-        }
-      >
-        {source.enabled ? '接入正常' : '已关闭'}
+      <div className={`text-xl font-bold ${statusColor}`}>
+        {displayStatus}
       </div>
     </div>
   )
@@ -427,7 +487,13 @@ export function AdminDashboard() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [importErrors, setImportErrors] = useState<GridImportError[]>([])
   const [activeImportId, setActiveImportId] = useState<number | null>(null)
+  const [importAudits, setImportAudits] = useState<GridImportAudit[]>([])
+  const [activeAuditId, setActiveAuditId] = useState<number | null>(null)
   const [activeSyncTaskId, setActiveSyncTaskId] = useState<number | null>(null)
+  const [topicBindings, setTopicBindings] = useState<TopicKnowledgeBinding[]>([])
+  const [docRelations, setDocRelations] = useState<DocumentRelationItem[]>([])
+  const [metrics, setMetrics] = useState<MetricItem[]>([])
+  const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>([])
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -441,14 +507,20 @@ export function AdminDashboard() {
         sourceData,
         importData,
         candidateData,
-        syncData
+        syncData,
+        bindingData,
+        relationData,
+        metricData
       ] = await Promise.all([
         adminFetch<{ list: AdminUser[] }>('users'),
         adminFetch<{ list: ExampleQuestion[] }>('example-questions'),
         adminFetch<{ list: DataSource[] }>('data-sources'),
         adminFetch<{ list: GridImport[] }>('grid-data/imports'),
         adminFetch<{ list: QuestionCandidate[] }>('question-candidates'),
-        qaSyncFetch<{ list: SyncTask[] }>('status?limit=8')
+        qaSyncFetch<{ list: SyncTask[] }>('status?limit=8'),
+        adminFetch<{ list: TopicKnowledgeBinding[] }>('topic-knowledge-bindings'),
+        adminFetch<{ list: DocumentRelationItem[] }>('document-relations'),
+        adminFetch<{ list: MetricItem[] }>('metrics')
       ])
       setUsers(userData.list || [])
       setQuestions(questionData.list || [])
@@ -456,6 +528,9 @@ export function AdminDashboard() {
       setImports(importData.list || [])
       setCandidates(candidateData.list || [])
       setSyncTasks(syncData.list || [])
+      setTopicBindings(bindingData.list || [])
+      setDocRelations(relationData.list || [])
+      setMetrics(metricData.list || [])
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '数据加载失败')
     } finally {
@@ -667,6 +742,15 @@ export function AdminDashboard() {
       setError('请选择要上传的 Excel 或 CSV 文件')
       return
     }
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (!ext || !['xlsx', 'xls', 'csv'].includes(ext)) {
+      setError('仅支持 .xlsx / .xls / .csv 格式文件')
+      return
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setError('文件大小不能超过 50MB')
+      return
+    }
     setSavingId('grid-upload')
     try {
       const formData = new FormData()
@@ -707,6 +791,103 @@ export function AdminDashboard() {
     } catch (saveError) {
       setError(
         saveError instanceof Error ? saveError.message : '失败明细加载失败'
+      )
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  function downloadTemplate() {
+    const a = document.createElement('a')
+    a.href = '/api/chatdb/admin/grid-data/template'
+    a.download = 'grid_import_template.xlsx'
+    a.click()
+  }
+
+  async function rollbackImport(importId: number) {
+    if (!confirm('确认回滚该批次？将删除该批次导入的所有案件记录，此操作不可撤销。')) return
+    setSavingId(`rollback-${importId}`)
+    try {
+      const data = await adminFetch<{ item: GridImport }>(
+        `grid-data/imports/${importId}/rollback`,
+        { method: 'POST', body: JSON.stringify({ operator: 'admin' }) }
+      )
+      setImports(prev =>
+        prev.map(item => (item.id === importId ? data.item : item))
+      )
+      setError('')
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '回滚失败')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function toggleTopicBinding(id: number, enabled: boolean) {
+    setSavingId(`binding-${id}`)
+    try {
+      await adminFetch(`topic-knowledge-bindings/${id}/toggle`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled })
+      })
+      setTopicBindings(prev =>
+        prev.map(b => (b.id === id ? { ...b, enabled, updateTime: Math.floor(Date.now() / 1000) } : b))
+      )
+      setError('')
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '切换绑定状态失败')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function unbindTopicKnowledge(id: number) {
+    if (!confirm('确认解除该绑定？')) return
+    setSavingId(`binding-${id}`)
+    try {
+      await adminFetch(`topic-knowledge-bindings/${id}`, { method: 'DELETE' })
+      setTopicBindings(prev => prev.filter(b => b.id !== id))
+      setError('')
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '解除绑定失败')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function bindTopicKnowledge(topic: string, knowledgeCode: string) {
+    setSavingId(`binding-new`)
+    try {
+      const data = await adminFetch<{ item: TopicKnowledgeBinding }>('topic-knowledge-bindings', {
+        method: 'POST',
+        body: JSON.stringify({ topic, knowledgeCode })
+      })
+      setTopicBindings(prev => [...prev, data.item])
+      setError('')
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '绑定知识库失败')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function loadImportAudit(importId: number) {
+    if (activeAuditId === importId) {
+      setActiveAuditId(null)
+      setImportAudits([])
+      return
+    }
+    setSavingId(`import-audit-${importId}`)
+    try {
+      const data = await adminFetch<{ list: GridImportAudit[] }>(
+        `grid-data/imports/${importId}/audit`
+      )
+      setActiveAuditId(importId)
+      setImportAudits(data.list || [])
+      setError('')
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : '审计日志加载失败'
       )
     } finally {
       setSavingId(null)
@@ -760,7 +941,7 @@ export function AdminDashboard() {
   }
 
   async function logout() {
-    await fetch('/api/chatdb/logout', { method: 'POST' }).catch(() => undefined)
+    await fetch('/api/chatdb/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined)
     window.localStorage.removeItem('chatdb_admin_login')
     window.location.reload()
   }
@@ -882,6 +1063,7 @@ export function AdminDashboard() {
               latestImport={latestImport}
               failedImports={failedImports}
               failedQueryCount={failedQueryCount}
+              syncTasks={syncTasks}
             />
           ) : null}
 
@@ -915,8 +1097,10 @@ export function AdminDashboard() {
               savingId={savingId}
               fileInputRef={fileInputRef}
               activeImportId={activeImportId}
+              activeAuditId={activeAuditId}
               activeSyncTaskId={activeSyncTaskId}
               importErrors={importErrors}
+              importAudits={importAudits}
               onFileChange={file => {
                 setSelectedFile(file)
                 if (file) {
@@ -927,6 +1111,98 @@ export function AdminDashboard() {
               onToggleErrors={loadImportErrors}
               onTriggerSync={triggerQaSync}
               onToggleSyncLogs={loadSyncLogs}
+              onDownloadTemplate={downloadTemplate}
+              onRollback={rollbackImport}
+              onToggleAudit={loadImportAudit}
+              topicBindings={topicBindings}
+              onToggleBinding={toggleTopicBinding}
+              onUnbindBinding={unbindTopicKnowledge}
+              onBindBinding={bindTopicKnowledge}
+            />
+          ) : null}
+
+          {!loading && activeSection === 'candidates' ? (
+            <CandidatesPanel
+              candidates={candidates}
+              onApprove={async (id: number) => {
+                await adminFetch(`question-candidates/${id}/approve`, { method: 'PUT' })
+                loadAdminData()
+              }}
+              onReject={async (id: number) => {
+                await adminFetch(`question-candidates/${id}/reject`, { method: 'PUT' })
+                loadAdminData()
+              }}
+            />
+          ) : null}
+
+          {!loading && activeSection === 'metrics' ? (
+            <MetricsPanel
+              metrics={metrics}
+              onReload={loadAdminData}
+              onCreate={async (topic: string, metricName: string, displayName: string, unit: string, defaultThreshold: number | null, thresholdDirection: string) => {
+                await adminFetch('metrics', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ topic, metricName, displayName, unit, defaultThreshold, thresholdDirection })
+                })
+                loadAdminData()
+              }}
+              onUpdate={async (id: number, data: Partial<MetricItem>) => {
+                await adminFetch(`metrics/${id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(data)
+                })
+                loadAdminData()
+              }}
+              onDelete={async (id: number) => {
+                await adminFetch(`metrics/${id}`, { method: 'DELETE' })
+                loadAdminData()
+              }}
+              onToggle={async (id: number) => {
+                await adminFetch(`metrics/${id}/toggle`, { method: 'PUT' })
+                loadAdminData()
+              }}
+            />
+          ) : null}
+
+          {!loading && activeSection === 'documents' ? (
+            <DocumentsPanel
+              relations={docRelations}
+              complianceIssues={complianceIssues}
+              onReload={loadAdminData}
+              onAutoDiscover={async (knowledgeCode, dryRun) => {
+                const result = await adminFetch<{ discovered?: DocumentRelationItem[]; created?: number }>('document-relations/auto', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ knowledgeCode, dryRun })
+                })
+                if (dryRun && result?.discovered) {
+                  setDocRelations(prev => [...prev, ...result.discovered!.map((d: DocumentRelationItem) => ({ ...d, id: -Date.now() }))])
+                } else {
+                  loadAdminData()
+                }
+              }}
+              onComplianceCheck={async (knowledgeCode) => {
+                const result = await adminFetch<{ issues?: ComplianceIssue[] }>('documents/compliance', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ knowledgeCode })
+                })
+                setComplianceIssues(result?.issues || [])
+              }}
+              onDeleteRelation={async (id: number) => {
+                await adminFetch(`document-relations/${id}`, { method: 'DELETE' })
+                loadAdminData()
+              }}
+              onCreateRelation={async (fromDocId: number, toDocId: number, relType: string, description: string) => {
+                await adminFetch('document-relations', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ fromDocId, toDocId, relType, description })
+                })
+                loadAdminData()
+              }}
             />
           ) : null}
 
@@ -970,7 +1246,8 @@ function OverviewPanel({
   imports,
   latestImport,
   failedImports,
-  failedQueryCount
+  failedQueryCount,
+  syncTasks
 }: {
   users: AdminUser[]
   questions: ExampleQuestion[]
@@ -980,7 +1257,17 @@ function OverviewPanel({
   latestImport?: GridImport
   failedImports: GridImport[]
   failedQueryCount: number
+  syncTasks: SyncTask[]
 }) {
+  const failedSyncTypes = new Set(
+    syncTasks.filter(t => t.status === 'failed' || t.status === 'partial_failed').map(t => {
+      const st = t.syncType
+      if (st.startsWith('traffic')) return 'traffic'
+      if (st.startsWith('population')) return 'population'
+      if (st.startsWith('grid')) return 'grid'
+      return st
+    })
+  )
   return (
     <div>
       <div className="flex flex-wrap gap-3">
@@ -988,13 +1275,19 @@ function OverviewPanel({
           <div className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
             <AlertTriangle className="h-5 w-5 text-[#ff3b30]" />
             <span>
-              {dataSources.find(item => !item.enabled)?.name || '数据源'}
-              接入中断
+              {dataSources.filter(item => !item.enabled).map(item => sourceLabels[item.type] || item.name).join('、')}
+              {' '}接入中断
             </span>
-            <span className="text-[#a6abb3]">10分钟前</span>
             <X className="h-4 w-4 text-[#a6abb3]" />
           </div>
         ) : null}
+        {[...failedSyncTypes].filter(type => dataSources.some(s => s.type === type && s.enabled)).map(type => (
+          <div key={type} className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
+            <AlertTriangle className="h-5 w-5 text-[#ff3b30]" />
+            <span>{sourceLabels[type as TopicKey] || type}同步失败</span>
+            <X className="h-4 w-4 text-[#a6abb3]" />
+          </div>
+        ))}
         {failedImports[0] ? (
           <div className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
             <span className="font-bold text-[#ff3b30]">!</span>
@@ -1034,7 +1327,7 @@ function OverviewPanel({
       <h2 className="mt-7 text-2xl font-bold">数据源状态</h2>
       <div className="mt-4 grid gap-5 xl:grid-cols-3">
         {dataSources.map(source => (
-          <SourceStatusCard key={source.type} source={source} />
+          <SourceStatusCard key={source.type} source={source} lastSyncFailed={failedSyncTypes.has(source.type)} />
         ))}
       </div>
     </div>
@@ -1311,13 +1604,22 @@ function DataPanel({
   savingId,
   fileInputRef,
   activeImportId,
+  activeAuditId,
   activeSyncTaskId,
   importErrors,
+  importAudits,
   onFileChange,
   onToggleSource,
   onToggleErrors,
   onTriggerSync,
-  onToggleSyncLogs
+  onToggleSyncLogs,
+  onDownloadTemplate,
+  onRollback,
+  onToggleAudit,
+  topicBindings,
+  onToggleBinding,
+  onUnbindBinding,
+  onBindBinding
 }: {
   dataSources: DataSource[]
   imports: GridImport[]
@@ -1327,17 +1629,42 @@ function DataPanel({
   savingId: string | null
   fileInputRef: React.RefObject<HTMLInputElement>
   activeImportId: number | null
+  activeAuditId: number | null
   activeSyncTaskId: number | null
   importErrors: GridImportError[]
+  importAudits: GridImportAudit[]
   onFileChange: (value: File | null) => void
   onToggleSource: (source: DataSource, enabled: boolean) => void
   onToggleErrors: (importId: number) => void
   onTriggerSync: (syncPath: string) => void
   onToggleSyncLogs: (taskId: number) => void
+  onDownloadTemplate: () => void
+  onRollback: (importId: number) => void
+  onToggleAudit: (importId: number) => void
+  topicBindings: TopicKnowledgeBinding[]
+  onToggleBinding: (id: number, enabled: boolean) => void
+  onUnbindBinding: (id: number) => void
+  onBindBinding: (topic: string, knowledgeCode: string) => void
 }) {
   const population = dataSources.find(source => source.type === 'population')
   const traffic = dataSources.find(source => source.type === 'traffic')
   const latestImport = imports[0]
+  const failedSyncTypes = new Set(
+    syncTasks.filter(t => t.status === 'failed' || t.status === 'partial_failed').map(t => {
+      const st = t.syncType
+      if (st.startsWith('traffic')) return 'traffic'
+      if (st.startsWith('population')) return 'population'
+      if (st.startsWith('grid')) return 'grid'
+      return st
+    })
+  )
+  const syncPathToSourceType: Record<string, string> = {
+    'knowledge-bases': '',
+    'documents': '',
+    'grid-data': 'grid',
+    'traffic-data': 'traffic',
+    'population-data': 'population'
+  }
   const syncActions = [
     {
       path: 'knowledge-bases',
@@ -1380,22 +1707,28 @@ function DataPanel({
         <div className="grid gap-4 px-7 py-6 lg:grid-cols-5">
           {syncActions.map(action => {
             const running = savingId === `qa-sync-${action.path}`
+            const sourceType = syncPathToSourceType[action.path]
+            const sourceDisabled = sourceType ? !dataSources.find(s => s.type === sourceType)?.enabled : false
             return (
               <button
                 key={action.path}
                 type="button"
                 onClick={() => onTriggerSync(action.path)}
-                disabled={!!savingId?.startsWith('qa-sync-')}
+                disabled={!!savingId?.startsWith('qa-sync-') || sourceDisabled}
                 className="min-h-[110px] rounded-[14px] border border-[#e1e3e8] bg-[#fafafa] p-4 text-left transition hover:border-[#111] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xl font-bold">{action.label}</span>
-                  <RefreshCw
-                    className={`h-5 w-5 text-[#8a9099] ${running ? 'animate-spin' : ''}`}
-                  />
+                  {sourceDisabled ? (
+                    <span className="text-sm font-bold text-[#8a9099]">已关闭</span>
+                  ) : (
+                    <RefreshCw
+                      className={`h-5 w-5 text-[#8a9099] ${running ? 'animate-spin' : ''}`}
+                    />
+                  )}
                 </div>
                 <p className="mt-3 text-base leading-6 text-[#7b818c]">
-                  {action.description}
+                  {sourceDisabled ? '数据源已关闭，请先开启后再同步' : action.description}
                 </p>
               </button>
             )
@@ -1496,15 +1829,21 @@ function DataPanel({
         {[population, traffic].filter(Boolean).map(source => (
           <div
             key={source!.type}
-            className="flex h-[120px] items-center justify-between rounded-[18px] border border-[#e1e3e8] bg-white px-7"
+            className={`flex h-[120px] items-center justify-between rounded-[18px] border bg-white px-7 ${failedSyncTypes.has(source!.type) && source!.enabled ? 'border-[#ff3b30]' : 'border-[#e1e3e8]'}`}
           >
             <div>
               <h2 className="text-2xl font-bold">
                 {sourceLabels[source!.type]}
               </h2>
-              <p className="mt-5 text-lg text-[#a0a6af]">
-                最后同步 {formatTime(source!.latestSync, true)}
-              </p>
+              {failedSyncTypes.has(source!.type) && source!.enabled ? (
+                <p className="mt-5 text-lg font-bold text-[#ff3b30]">
+                  最近同步失败
+                </p>
+              ) : (
+                <p className="mt-5 text-lg text-[#a0a6af]">
+                  最后同步 {formatTime(source!.latestSync, true)}
+                </p>
+              )}
             </div>
             <AdminToggle
               checked={source!.enabled}
@@ -1514,6 +1853,95 @@ function DataPanel({
           </div>
         ))}
       </div>
+
+      <section className="rounded-[18px] border border-[#e1e3e8] bg-white">
+        <div className="border-b border-[#eceef2] px-7 py-6">
+          <h2 className="text-2xl font-bold">主题知识库绑定</h2>
+          <p className="mt-2 text-lg text-[#8a9099]">配置各主题可访问的问答知识库范围。</p>
+        </div>
+        <div className="px-7 py-7">
+          <table className="min-w-full table-fixed text-left text-xl">
+            <colgroup>
+              <col className="w-[20%]" />
+              <col className="w-[25%]" />
+              <col className="w-[15%]" />
+              <col className="w-[20%]" />
+              <col className="w-[20%]" />
+            </colgroup>
+            <thead className="bg-[#f7f7f8] text-lg text-[#8a9099]">
+              <tr>
+                <th className="px-5 py-4 font-bold">主题</th>
+                <th className="px-5 py-4 font-bold">知识库</th>
+                <th className="px-5 py-4 font-bold">状态</th>
+                <th className="px-5 py-4 font-bold">更新时间</th>
+                <th className="px-5 py-4 font-bold">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#eceef2]">
+              {topicBindings.map(b => (
+                <tr key={b.id}>
+                  <td className="px-5 py-5">{sourceLabels[b.topic as TopicKey] || b.topic}</td>
+                  <td className="px-5 py-5">{b.knowledgeName || b.knowledgeCode}</td>
+                  <td className="px-5 py-5">
+                    <AdminToggle
+                      checked={b.enabled}
+                      disabled={savingId === `binding-${b.id}`}
+                      onChange={checked => onToggleBinding(b.id, checked)}
+                    />
+                  </td>
+                  <td className="px-5 py-5 text-[#8a9099]">{formatTime(b.updateTime, true)}</td>
+                  <td className="px-5 py-5">
+                    <button
+                      type="button"
+                      onClick={() => onUnbindBinding(b.id)}
+                      disabled={savingId === `binding-${b.id}`}
+                      className="text-base font-bold text-[#ff3b30] hover:underline disabled:opacity-50"
+                    >
+                      解除绑定
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {topicBindings.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-5 py-5 text-center text-[#8a9099]">
+                    暂无绑定，请在上方新增
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="mt-6 flex flex-wrap items-center gap-4">
+            <select
+              id="new-binding-topic"
+              className="h-[44px] rounded-lg border border-[#dfe3ea] px-4 text-lg"
+              defaultValue=""
+            >
+              <option value="" disabled>选择主题</option>
+              <option value="grid">网格</option>
+              <option value="traffic">车流</option>
+              <option value="population">人流</option>
+            </select>
+            <input
+              id="new-binding-code"
+              className="h-[44px] w-[200px] rounded-lg border border-[#dfe3ea] px-4 text-lg"
+              placeholder="知识库编码"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const topic = (document.getElementById('new-binding-topic') as HTMLSelectElement)?.value
+                const code = (document.getElementById('new-binding-code') as HTMLInputElement)?.value?.trim()
+                if (topic && code) onBindBinding(topic, code)
+              }}
+              disabled={savingId === 'binding-new'}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#111] px-5 py-3 text-base font-bold text-white disabled:cursor-not-allowed disabled:bg-[#b8bdc7]"
+            >
+              绑定知识库
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-[18px] border border-[#e1e3e8] bg-white">
         <div className="border-b border-[#eceef2] px-7 py-6">
@@ -1564,6 +1992,14 @@ function DataPanel({
             </span>
           </label>
 
+          <button
+            type="button"
+            onClick={onDownloadTemplate}
+            className="mt-4 text-base font-bold text-[#4f6ef7] hover:underline"
+          >
+            下载导入模板
+          </button>
+
           {savingId === 'grid-upload' ? (
             <div className="mt-4 text-right text-base font-bold text-[#111]">
               正在导入，请稍候...
@@ -1575,19 +2011,57 @@ function DataPanel({
             {imports.map(item => (
               <Fragment key={item.id}>
                 <div className="flex items-center justify-between py-4">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="text-xl">{item.fileName}</div>
                     <div className="mt-1 text-lg text-[#a0a6af]">
                       {formatTime(item.createTime, true)} · {item.successRows}{' '}
                       条{item.failedRows ? ` · 失败 ${item.failedRows} 条` : ''}
                     </div>
                   </div>
-                  <button type="button" onClick={() => onToggleErrors(item.id)}>
-                    <Tag danger={item.status !== 'completed'}>
-                      {statusLabel(item.status)}
-                    </Tag>
-                  </button>
+                  <div className="ml-4 flex shrink-0 items-center gap-2">
+                    {item.status === 'completed' || item.status === 'partial_success' ? (
+                      <button
+                        type="button"
+                        className="text-sm text-[#d93025] hover:underline disabled:opacity-40"
+                        disabled={savingId === `rollback-${item.id}`}
+                        onClick={() => onRollback(item.id)}
+                      >
+                        {savingId === `rollback-${item.id}` ? '回滚中...' : '回滚'}
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={() => onToggleAudit(item.id)}>
+                      <span className="text-sm text-[#4f6ef7] hover:underline">审计</span>
+                    </button>
+                    <button type="button" onClick={() => onToggleErrors(item.id)}>
+                      <Tag danger={item.status !== 'completed'}>
+                        {statusLabel(item.status)}
+                      </Tag>
+                    </button>
+                  </div>
                 </div>
+                {activeAuditId === item.id ? (
+                  <div className="rounded-xl bg-[#f0f4ff] p-4">
+                    <div className="mb-2 text-base font-bold text-[#4f6ef7]">操作审计</div>
+                    {importAudits.length === 0 ? (
+                      <div className="text-lg text-[#8a9099]">暂无审计记录</div>
+                    ) : (
+                      importAudits.map(audit => (
+                        <div key={audit.id} className="flex items-start gap-3 border-l-2 border-[#4f6ef7] py-2 pl-3 text-base">
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold">{audit.action === 'upload' ? '上传' : audit.action === 'rollback' ? '回滚' : audit.action}</span>
+                            <span className="mx-2 text-[#a0a6af]">·</span>
+                            <span className="text-[#6b7280]">{audit.operator}</span>
+                            <span className="mx-2 text-[#a0a6af]">·</span>
+                            <span className="text-[#a0a6af]">{formatTime(audit.createTime, true)}</span>
+                            {audit.detail ? (
+                              <div className="mt-1 text-[#6b7280]">{audit.detail}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : null}
                 {activeImportId === item.id ? (
                   <div className="rounded-xl bg-[#f7f7f8] p-4">
                     {importErrors.length === 0 ? (
@@ -1609,6 +2083,367 @@ function DataPanel({
           </div>
         </div>
       </section>
+    </div>
+  )
+}
+
+function CandidatesPanel({
+  candidates,
+  onApprove,
+  onReject
+}: {
+  candidates: QuestionCandidate[]
+  onApprove: (id: number) => Promise<void>
+  onReject: (id: number) => Promise<void>
+}) {
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [approving, setApproving] = useState<number | null>(null)
+  const statusLabels: Record<string, { label: string; cls: string }> = {
+    pending: { label: '待审批', cls: 'bg-[#fef9c3] text-[#a16207]' },
+    approved: { label: '已通过', cls: 'bg-[#dcfce7] text-[#16a34a]' },
+    rejected: { label: '已拒绝', cls: 'bg-[#f3f4f6] text-[#6b7280]' }
+  }
+
+  const filtered = statusFilter === 'all' ? candidates : candidates.filter(c => c.status === statusFilter)
+  const pendingCount = candidates.filter(c => c.status === 'pending').length
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        {['all', 'pending', 'approved', 'rejected'].map(s => (
+          <button key={s} type="button"
+            onClick={() => setStatusFilter(s)}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              statusFilter === s ? 'bg-[#333] text-white' : 'border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-[#f9fafb]'
+            }`}
+          >
+            {s === 'all' ? `全部(${candidates.length})` : `${statusLabels[s]?.label || s}(${candidates.filter(c => c.status === s).length})`}
+          </button>
+        ))}
+      </div>
+
+      {pendingCount > 0 ? (
+        <div className="rounded-xl border border-[#fef9c3] bg-[#fffef5] px-4 py-3 text-sm text-[#a16207]">
+          有 {pendingCount} 条候选问题待审批，审批通过后将自动创建为示例问题。
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        {filtered.map(c => {
+          const st = statusLabels[c.status] || { label: c.status, cls: 'text-[#6b7280]' }
+          return (
+            <div key={c.id} className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm">
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}>
+                {st.label}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">{c.question}</span>
+              <span className="shrink-0 text-[11px] text-[#9ca3af]">{topicLabels[c.topic] || c.topic}</span>
+              <span className="shrink-0 text-[11px] text-[#9ca3af]">问{c.count}次</span>
+              {c.status === 'pending' ? (
+                <>
+                  <button type="button" disabled={approving === c.id}
+                    onClick={async () => { setApproving(c.id); try { await onApprove(c.id) } finally { setApproving(null) } }}
+                    className="shrink-0 rounded-lg bg-[#16a34a] px-3 py-1 text-[12px] font-medium text-white disabled:opacity-50"
+                  >通过</button>
+                  <button type="button"
+                    onClick={() => onReject(c.id)}
+                    className="shrink-0 rounded-lg border border-[#fecaca] px-3 py-1 text-[12px] font-medium text-[#dc2626]"
+                  >拒绝</button>
+                </>
+              ) : null}
+            </div>
+          )
+        })}
+        {filtered.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">暂无候选问题</div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function MetricsPanel({
+  metrics,
+  onReload,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onToggle
+}: {
+  metrics: MetricItem[]
+  onReload: () => void
+  onCreate: (topic: string, metricName: string, displayName: string, unit: string, defaultThreshold: number | null, thresholdDirection: string) => Promise<void>
+  onUpdate: (id: number, data: Partial<MetricItem>) => Promise<void>
+  onDelete: (id: number) => Promise<void>
+  onToggle: (id: number) => Promise<void>
+}) {
+  const [topicFilter, setTopicFilter] = useState<string>('all')
+  const [showCreate, setShowCreate] = useState(false)
+  const [createForm, setCreateForm] = useState({ topic: 'traffic', metricName: '', displayName: '', unit: '', defaultThreshold: '' as string, thresholdDirection: 'up' })
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState<Partial<MetricItem>>({})
+
+  const filtered = topicFilter === 'all' ? metrics : metrics.filter(m => m.topic === topicFilter)
+
+  const topicOpts: Array<{ key: string; label: string }> = [
+    { key: 'all', label: '全部' },
+    { key: 'traffic', label: '车流' },
+    { key: 'population', label: '人流' },
+    { key: 'grid', label: '网格' }
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        {topicOpts.map(opt => (
+          <button key={opt.key} type="button"
+            onClick={() => setTopicFilter(opt.key)}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              topicFilter === opt.key ? 'bg-[#333] text-white' : 'border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-[#f9fafb]'
+            }`}
+          >{opt.label}({opt.key === 'all' ? metrics.length : metrics.filter(m => m.topic === opt.key).length})</button>
+        ))}
+        <button type="button" onClick={() => setShowCreate(v => !v)}
+          className="ml-auto rounded-lg bg-[#333] px-4 py-2 text-sm font-medium text-white"
+        >新增指标</button>
+      </div>
+
+      {showCreate ? (
+        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <select value={createForm.topic} onChange={e => setCreateForm(f => ({ ...f, topic: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm">
+              <option value="traffic">车流</option>
+              <option value="population">人流</option>
+              <option value="grid">网格</option>
+            </select>
+            <input placeholder="指标名(英)" value={createForm.metricName}
+              onChange={e => setCreateForm(f => ({ ...f, metricName: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <input placeholder="显示名称" value={createForm.displayName}
+              onChange={e => setCreateForm(f => ({ ...f, displayName: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <input placeholder="单位" value={createForm.unit}
+              onChange={e => setCreateForm(f => ({ ...f, unit: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <input placeholder="默认阈值(选填)" type="number" value={createForm.defaultThreshold}
+              onChange={e => setCreateForm(f => ({ ...f, defaultThreshold: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <select value={createForm.thresholdDirection}
+              onChange={e => setCreateForm(f => ({ ...f, thresholdDirection: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm">
+              <option value="up">向上超阈值</option>
+              <option value="down">向下超阈值</option>
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={async () => {
+              if (!createForm.metricName) return
+              const threshold = createForm.defaultThreshold ? Number(createForm.defaultThreshold) : null
+              await onCreate(createForm.topic, createForm.metricName, createForm.displayName, createForm.unit, threshold, createForm.thresholdDirection)
+              setShowCreate(false)
+              setCreateForm({ topic: 'traffic', metricName: '', displayName: '', unit: '', defaultThreshold: '', thresholdDirection: 'up' })
+            }} className="rounded-lg bg-[#333] px-4 py-2 text-sm text-white">保存</button>
+            <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm">取消</button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        {filtered.map(m => (
+          <div key={m.id} className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm">
+            {editingId === m.id ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <input value={editForm.displayName || ''} placeholder="显示名称"
+                    onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))}
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm" />
+                  <input value={editForm.unit || ''} placeholder="单位"
+                    onChange={e => setEditForm(f => ({ ...f, unit: e.target.value }))}
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm" />
+                  <input value={editForm.defaultThreshold ?? ''} placeholder="阈值" type="number"
+                    onChange={e => setEditForm(f => ({ ...f, defaultThreshold: e.target.value ? Number(e.target.value) : null }))}
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm" />
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={async () => {
+                    await onUpdate(m.id, editForm)
+                    setEditingId(null)
+                  }} className="rounded-lg bg-[#333] px-3 py-1 text-[12px] text-white">保存</button>
+                  <button type="button" onClick={() => setEditingId(null)} className="rounded-lg border border-[#e5e7eb] px-3 py-1 text-[12px]">取消</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => onToggle(m.id)}
+                  className={`shrink-0 h-4 w-7 rounded-full transition-colors ${m.isActive ? 'bg-[#16a34a]' : 'bg-[#d1d5db]'} relative`}>
+                  <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${m.isActive ? 'left-3.5' : 'left-0.5'}`} />
+                </button>
+                <span className="shrink-0 text-[11px] text-[#9ca3af]">{topicLabels[m.topic as TopicKey] || m.topic}</span>
+                <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">{m.displayName || m.metricName}</span>
+                {m.defaultThreshold != null ? <span className="shrink-0 text-[11px] text-[#6b7280]">阈值{m.defaultThreshold}{m.unit}</span> : null}
+                <span className="shrink-0 text-[11px] text-[#9ca3af]">{m.unit}</span>
+                <button type="button" onClick={() => { setEditingId(m.id); setEditForm({ displayName: m.displayName, unit: m.unit, defaultThreshold: m.defaultThreshold, description: m.description }) }}
+                  className="shrink-0 text-[12px] text-[#2563eb] hover:underline">编辑</button>
+                <button type="button" onClick={() => onDelete(m.id)}
+                  className="shrink-0 text-[12px] text-[#dc2626] hover:underline">删除</button>
+              </div>
+            )}
+          </div>
+        ))}
+        {filtered.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">暂无指标记录</div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+const relTypeLabels: Record<string, string> = {
+  reference: '引用',
+  supplement: '补充',
+  repeal: '废止',
+  related: '相关'
+}
+
+function DocumentsPanel({
+  relations,
+  complianceIssues,
+  onReload,
+  onAutoDiscover,
+  onComplianceCheck,
+  onDeleteRelation,
+  onCreateRelation
+}: {
+  relations: DocumentRelationItem[]
+  complianceIssues: ComplianceIssue[]
+  onReload: () => void
+  onAutoDiscover: (knowledgeCode: string, dryRun: boolean) => Promise<void>
+  onComplianceCheck: (knowledgeCode?: string) => Promise<void>
+  onDeleteRelation: (id: number) => Promise<void>
+  onCreateRelation: (fromDocId: number, toDocId: number, relType: string, description: string) => Promise<void>
+}) {
+  const [relFilter, setRelFilter] = useState<string>('all')
+  const [discovering, setDiscovering] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
+  const [createForm, setCreateForm] = useState({ fromDocId: '', toDocId: '', relType: 'reference', description: '' })
+
+  const filtered = relFilter === 'all' ? relations : relations.filter(r => r.relType === relFilter)
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <select
+          value={relFilter}
+          onChange={e => setRelFilter(e.target.value)}
+          className="rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-sm"
+        >
+          <option value="all">全部类型</option>
+          <option value="reference">引用</option>
+          <option value="supplement">补充</option>
+          <option value="repeal">废止</option>
+          <option value="related">相关</option>
+        </select>
+        <span className="text-sm text-[#6b7280]">共 {filtered.length} 条关联</span>
+        <button
+          type="button"
+          onClick={() => setShowCreate(v => !v)}
+          className="ml-auto rounded-lg bg-[#333] px-4 py-2 text-sm font-medium text-white"
+        >新建关联</button>
+      </div>
+
+      {showCreate ? (
+        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <input placeholder="来源文档ID" value={createForm.fromDocId}
+              onChange={e => setCreateForm(f => ({ ...f, fromDocId: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <input placeholder="目标文档ID" value={createForm.toDocId}
+              onChange={e => setCreateForm(f => ({ ...f, toDocId: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+          </div>
+          <div className="flex gap-3">
+            <select value={createForm.relType}
+              onChange={e => setCreateForm(f => ({ ...f, relType: e.target.value }))}
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm">
+              <option value="reference">引用</option>
+              <option value="supplement">补充</option>
+              <option value="repeal">废止</option>
+              <option value="related">相关</option>
+            </select>
+            <input placeholder="描述（选填）" value={createForm.description}
+              onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
+              className="min-w-0 flex-1 rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={async () => {
+              const fromId = Number(createForm.fromDocId)
+              const toId = Number(createForm.toDocId)
+              if (fromId && toId) {
+                await onCreateRelation(fromId, toId, createForm.relType, createForm.description)
+                setShowCreate(false)
+                setCreateForm({ fromDocId: '', toDocId: '', relType: 'reference', description: '' })
+              }
+            }} className="rounded-lg bg-[#333] px-4 py-2 text-sm text-white">保存</button>
+            <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm">取消</button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        {filtered.map(r => (
+          <div key={r.id} className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm">
+            <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">{r.fromDocTitle}</span>
+            <span className="shrink-0 rounded-full bg-[#f3f4f6] px-2.5 py-0.5 text-[11px] font-semibold text-[#6b7280]">{relTypeLabels[r.relType] || r.relType}</span>
+            <span className="min-w-0 flex-1 truncate text-[#6b7280]">{r.toDocTitle}</span>
+            {r.description ? <span className="shrink-0 text-[11px] text-[#9ca3af]">{r.description}</span> : null}
+            <button type="button" onClick={() => onDeleteRelation(r.id)} className="shrink-0 text-[12px] text-[#dc2626] hover:underline">删除</button>
+          </div>
+        ))}
+        {filtered.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">暂无文档关联记录</div>
+        ) : null}
+      </div>
+
+      <div className="flex items-center gap-3 border-t border-[#eeeeee] pt-4">
+        <button
+          type="button"
+          disabled={discovering}
+          onClick={async () => {
+            setDiscovering(true)
+            try { await onAutoDiscover('', true) } finally { setDiscovering(false) }
+          }}
+          className="rounded-lg border border-[#e5e7eb] bg-white px-4 py-2 text-sm font-medium text-[#374151] disabled:opacity-50"
+        >{discovering ? '扫描中...' : '自动发现关联（预览）'}</button>
+        <button
+          type="button"
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true)
+            try { await onComplianceCheck() } finally { setChecking(false) }
+          }}
+          className="rounded-lg border border-[#e5e7eb] bg-white px-4 py-2 text-sm font-medium text-[#374151] disabled:opacity-50"
+        >{checking ? '检查中...' : '合规检查'}</button>
+      </div>
+
+      {complianceIssues.length > 0 ? (
+        <div className="space-y-2">
+          <div className="text-sm font-semibold text-[#dc2626]">合规告警（{complianceIssues.length}）</div>
+          {complianceIssues.map((issue, i) => (
+            <div key={i} className="rounded-xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-[#dc2626]">[{issue.severity}]</span>
+                <span className="font-medium text-[#374151]">{issue.documentTitle}</span>
+                <span className="rounded-full bg-[#fef2f2] px-2 py-0.5 text-[11px] text-[#dc2626]">{issue.issueType}</span>
+              </div>
+              <p className="mt-1 text-[#6b7280]">{issue.description}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

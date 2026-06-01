@@ -19,12 +19,44 @@ import {
 import { Streamdown, type StreamdownProps } from 'streamdown'
 
 import { mergeStreamdownSpecRenderer } from '@/lib/render/streamdown-spec'
+import { readSSEStream } from '@/lib/chatdb/sse'
 
 import { QuestionInputBar } from './question-input-bar'
+
+type InsightMeta = {
+  keyPoints?: string[]
+  impacts?: string[]
+  suggestions?: string[]
+}
+
+type FastPathFormat = {
+  version?: string
+  sections?: string[]
+  chartRule?: string
+  insightCollapsedDefault?: boolean
+  naturalLanguageOnly?: boolean
+  insightMeta?: InsightMeta
+}
+
+type ThinkingFrame = {
+  content: string
+  timestamp: number
+}
 
 type Message = {
   role: 'user' | 'assistant'
   content: string
+  metadata?: {
+    fastPath?: boolean
+    format?: FastPathFormat
+    insightMeta?: InsightMeta
+    allDates?: boolean
+    hybrid?: boolean
+    startTime?: number
+    elapsedMs?: number
+    tables?: string
+  }
+  thinkingFrames?: ThinkingFrame[]
 }
 
 type MajorCaseAnalysis = {
@@ -42,9 +74,13 @@ type MajorCaseAnalysis = {
     description?: string
     impactScore?: number
     difficultyScore?: number
+    timeRiskScore?: number
     totalScore?: number
+    level?: string
+    suggestion?: string[]
   }
   basis?: string[]
+  suggestion?: string[]
 }
 
 type StoredConversation = {
@@ -107,7 +143,7 @@ type ChartSeries = {
   data: number[]
 }
 
-type ChartType = 'line' | 'bar' | 'pie' | 'table'
+type ChartType = 'line' | 'bar' | 'bar_compare' | 'bar_rank' | 'pie' | 'table' | 'metric_card'
 
 type ChartPayload = {
   type?: ChartType
@@ -265,7 +301,7 @@ function parseRichContent(content: string): RichBlock[] {
           payload: {
             ...payload,
             type:
-              language === 'chatdb-line-chart' ? 'line' : payload.type || 'line'
+              language === 'chatdb-line-chart' ? 'line' : (payload.type === 'bar_compare' ? 'bar_compare' : payload.type === 'bar_rank' ? 'bar_rank' : payload.type || 'line')
           }
         })
       }
@@ -324,13 +360,16 @@ function buildLinePath(
   width: number,
   height: number,
   min: number,
-  max: number
+  max: number,
+  offsetX: number = 0,
+  groupWidth: number = width
 ) {
   const span = max - min || 1
   return values
     .map((value, index) => {
-      const x =
-        values.length === 1 ? width / 2 : (index / (values.length - 1)) * width
+      const x = values.length === 1
+        ? width / 2
+        : offsetX + index * groupWidth + groupWidth / 2
       const y = height - ((value - min) / span) * height
       return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
     })
@@ -359,7 +398,7 @@ function aggregatePieData(labels: string[], series: ChartSeries[]) {
   const groups = new Map<string, number>()
 
   data.forEach((value, index) => {
-    const label = (labels[index] || `项目${index + 1}`).trim()
+    const label = (labels[index] || `项目${index + 1}`).trim().replace(/[（(][\s\S]*?[）)]$/, '').trim()
     groups.set(label, (groups.get(label) || 0) + value)
   })
 
@@ -376,6 +415,18 @@ function shouldRotateAxisLabels(labels: string[]) {
   return labels.some(label => label.length > 5) || labels.length > 6
 }
 
+function niceMax(value: number): number {
+  if (value <= 0) return 0
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)))
+  const residual = value / magnitude
+  let nice: number
+  if (residual <= 1) nice = 1
+  else if (residual <= 2) nice = 2
+  else if (residual <= 5) nice = 5
+  else nice = 10
+  return nice * magnitude
+}
+
 function compactChartLabel(label: string, maxLength = 7) {
   const value = label.trim()
   if (value.length <= maxLength) return value
@@ -384,20 +435,48 @@ function compactChartLabel(label: string, maxLength = 7) {
 
 function splitChartLabel(label: string) {
   const value = label.trim()
-  if (value.length <= 6) return [value]
-  return [value.slice(0, 6), compactChartLabel(value.slice(6), 6)]
+  if (value.length <= 5) return [value]
+  // Prefer breaking at "/" or spaces
+  const breakChar = ['/', ' ', '／'].find(c => value.includes(c))
+  if (breakChar) {
+    const idx = value.indexOf(breakChar)
+    const first = value.slice(0, idx)
+    const rest = value.slice(idx + 1)
+    return [first, ...(rest.length > 5 ? splitChartLabel(rest) : [rest])]
+  }
+  // No natural break point: break at 4 chars
+  const lines: string[] = []
+  for (let i = 0; i < value.length; i += 4) {
+    lines.push(value.slice(i, i + 4))
+  }
+  return lines
 }
 
 function svgToDataUrl(svgMarkup: string) {
-  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgMarkup)))}`	
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgMarkup)))}`
 }
 
-function buildChartSvgForCopy(payload: ChartPayload) {
+function applyChartTopN(labels: string[], series: ChartSeries[], topN: number | undefined) {
+  if (!topN || topN <= 0 || labels.length <= topN || !series.length) return { labels, series }
+  const primarySeries = series[0]
+  const indexed = labels.map((label, i) => ({ label, value: primarySeries.data[i] ?? 0 }))
+  indexed.sort((a, b) => b.value - a.value)
+  const kept = new Set(indexed.slice(0, topN).map(item => item.label))
+  const keepIndices = labels.map((label, i) => kept.has(label) ? i : -1).filter(i => i >= 0)
+  return {
+    labels: keepIndices.map(i => labels[i]),
+    series: series.map(item => ({ ...item, data: keepIndices.map(i => item.data[i]) }))
+  }
+}
+
+function buildChartSvgForCopy(payload: ChartPayload, topN?: number) {
   const activeType = payload.type || 'line'
-  const labels = payload.x || payload.labels || []
-  const series = payload.series?.filter(item => item.data?.length) || []
+  const rawLabels = payload.x || payload.labels || []
+  const rawSeries = payload.series?.filter(item => item.data?.length) || []
+  const { labels, series } = applyChartTopN(rawLabels, rawSeries, topN)
   const values = series.flatMap(item => item.data)
-  const max = values.length ? Math.max(...values) : 0
+  const rawDataMax = values.length ? Math.max(...values) : 0
+  const max = activeType === 'pie' ? rawDataMax : niceMax(rawDataMax)
   const min =
     activeType === 'bar' || activeType === 'line'
       ? 0
@@ -567,20 +646,78 @@ function buildChartImageSvg({
     `
   }
 
+  if (activeType === 'metric_card' && tableRows.length) {
+    const cardWidth = 200
+    const cardHeight = 80
+    const gap = 16
+    const cols = Math.min(tableRows.length, 3)
+    const rows = Math.ceil(tableRows.length / cols)
+    const contentWidth = cols * cardWidth + (cols - 1) * gap
+    const contentHeight = rows * cardHeight + (rows - 1) * gap
+    const svgWidth = Math.max(width, contentWidth + 64)
+    const svgHeight = titleHeight + contentHeight + 48
+
+    const cards = tableRows.map((row, index) => {
+      const col = index % cols
+      const rowNum = Math.floor(index / cols)
+      const x = 32 + col * (cardWidth + gap)
+      const y = titleHeight + 16 + rowNum * (cardHeight + gap)
+      const label = escapeSvgText(String(row[0] ?? ''))
+      const value = escapeSvgText(row[1] != null ? String(row[1]) : '—')
+      const isPrimary = index === 0
+      const borderColor = isPrimary ? '#4f83ff' : '#e8eef8'
+      const bgColor = isPrimary ? '#f0f5ff' : '#ffffff'
+      const valueColor = isPrimary ? '#4f83ff' : '#111827'
+      const valueSize = isPrimary ? '28' : '22'
+      return `
+        <rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="12" fill="${bgColor}" stroke="${borderColor}" stroke-width="${isPrimary ? 2 : 1}"/>
+        <text x="${x + 16}" y="${y + 28}" font-size="12" fill="#6b7280">${label}</text>
+        <text x="${x + 16}" y="${y + 58}" font-size="${valueSize}" font-weight="700" fill="${valueColor}">${value}</text>
+      `
+    }).join('')
+
+    return `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">
+        <rect width="100%" height="100%" rx="18" fill="#ffffff"/>
+        <text x="32" y="38" font-family="${fontFamily}" font-size="22" font-weight="700" fill="#111827">${title}</text>
+        ${cards}
+      </svg>
+    `
+  }
+
   const axis = `
     <line x1="${left}" y1="${top}" x2="${left}" y2="${top + chartHeight}" stroke="#d1d5db"/>
     <line x1="${left}" y1="${top + chartHeight}" x2="${left + chartWidth}" y2="${top + chartHeight}" stroke="#d1d5db"/>
+    <text x="${left - 8}" y="${top + chartHeight + 3}" font-family="${fontFamily}" font-size="10" text-anchor="end" fill="#9ca3af">0</text>
+    <text x="${left - 8}" y="${top + 4}" font-family="${fontFamily}" font-size="10" text-anchor="end" fill="#9ca3af">${max}</text>
+    ${[0.25, 0.5, 0.75].map(r => `
+      <line x1="${left}" y1="${top + chartHeight * (1 - r)}" x2="${left + chartWidth}" y2="${top + chartHeight * (1 - r)}" stroke="#f3f4f6" stroke-dasharray="4 3"/>
+      <text x="${left - 8}" y="${top + chartHeight * (1 - r) + 3}" font-family="${fontFamily}" font-size="10" text-anchor="end" fill="#d1d5db">${Math.round(max * r)}</text>
+    `).join('')}
   `
   const labelSvg = labels
     .map((label, index) => {
       const x = left + (index / Math.max(labels.length - 1, 1)) * chartWidth
-      const displayLabel = escapeSvgText(
-        label.slice(0, rotateAxisLabels ? 12 : 8)
-      )
       if (rotateAxisLabels) {
+        const displayLabel = escapeSvgText(label.slice(0, 12))
         return `<text x="${x}" y="${top + chartHeight + 34}" transform="rotate(45 ${x} ${top + chartHeight + 34})" font-family="${fontFamily}" font-size="13" text-anchor="start" fill="#6b7280">${displayLabel}</text>`
       }
-      return `<text x="${x}" y="${top + chartHeight + 30}" font-family="${fontFamily}" font-size="13" text-anchor="middle" fill="#6b7280">${displayLabel}</text>`
+      const splitForCopy = (s: string): string[] => {
+        if (s.length <= 5) return [s]
+        const breakChar = ['/', ' ', '／'].find(c => s.includes(c))
+        if (breakChar) {
+          const idx = s.indexOf(breakChar)
+          const first = s.slice(0, idx)
+          const rest = s.slice(idx + 1)
+          return [first, ...splitForCopy(rest)]
+        }
+        const lines: string[] = []
+        for (let i = 0; i < s.length; i += 4) lines.push(s.slice(i, i + 4))
+        return lines
+      }
+      const cleanLabel = label.replace(/[（(][\s\S]*?[）)]$/, '').trim()
+      const lines = splitForCopy(cleanLabel).map(l => escapeSvgText(l))
+      return lines.map((line, li) => `<text x="${x}" y="${top + chartHeight + 22 + li * 14}" font-family="${fontFamily}" font-size="11" text-anchor="middle" fill="#6b7280">${line}</text>`).join('')
     })
     .join('')
   const seriesSvg = series
@@ -600,10 +737,10 @@ function buildChartImageSvg({
               index * groupWidth +
               (groupWidth - barWidth * series.length) / 2 +
               seriesIndex * barWidth
-            const labelY = Math.max(top + 18, top + chartHeight - height - 10)
+            const barY = top + chartHeight - height
             return `
-              <rect x="${x}" y="${top + chartHeight - height}" width="${barWidth}" height="${height}" rx="6" fill="${color}" opacity="0.88"/>
-              <text x="${x + barWidth / 2}" y="${labelY}" font-family="${fontFamily}" font-size="13" text-anchor="middle" fill="#374151">${escapeSvgText(value)}</text>
+              <rect x="${x}" y="${barY}" width="${barWidth}" height="${height}" rx="6" fill="${color}" opacity="0.88"/>
+              <text x="${x + barWidth / 2}" y="${barY - 5}" font-family="${fontFamily}" font-size="13" text-anchor="middle" fill="#374151">${escapeSvgText(value)}</text>
             `
           })
           .join('')
@@ -727,20 +864,38 @@ async function copySvgAsPng(svgMarkup: string) {
   return false
 }
 
-function ChatDbChart({ payload }: { payload: ChartPayload }) {
+function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }) {
   const [activeType, setActiveType] = useState<ChartType>(
     payload.type || 'line'
   )
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>(
     'idle'
   )
-  const labels = payload.x || payload.labels || []
-  const series = payload.series?.filter(item => item.data?.length) || []
+  const rawLabels = payload.x || payload.labels || []
+  const rawSeries = payload.series?.filter(item => item.data?.length) || []
+
+  let labels = rawLabels
+  let series = rawSeries
+  if (topN && topN > 0 && labels.length > topN && series.length) {
+    const primarySeries = series[0]
+    const indexed = labels.map((label, i) => ({ label, value: primarySeries.data[i] ?? 0 }))
+    indexed.sort((a, b) => b.value - a.value)
+    const kept = new Set(indexed.slice(0, topN).map(item => item.label))
+    const keepIndices = labels
+      .map((label, i) => kept.has(label) ? i : -1)
+      .filter(i => i >= 0)
+    labels = keepIndices.map(i => labels[i])
+    series = series.map(item => ({
+      ...item,
+      data: keepIndices.map(i => item.data[i])
+    }))
+  }
 
   if (!series.length && !payload.table?.rows?.length) return null
 
   const values = series.flatMap(item => item.data)
-  const max = values.length ? Math.max(...values) : 0
+  const rawDataMax = values.length ? Math.max(...values) : 0
+  const max = activeType === 'pie' ? rawDataMax : niceMax(rawDataMax)
   const min =
     activeType === 'bar' || activeType === 'line'
       ? 0
@@ -749,7 +904,8 @@ function ChatDbChart({ payload }: { payload: ChartPayload }) {
         : 0
   const chartWidth = 320
   const chartHeight = 150
-  const axisLeft = 42
+  const maxLabelLen = String(max).length
+  const axisLeft = maxLabelLen >= 4 ? 52 : 42
   const axisTop = 10
   const axisLabelHeight = shouldRotateAxisLabels(labels) ? 58 : 36
   const pieItems = activeType === 'pie' ? aggregatePieData(labels, series) : []
@@ -909,9 +1065,96 @@ function ChatDbChart({ payload }: { payload: ChartPayload }) {
             })}
           </div>
         </div>
-      ) : series.length ? (
+      ) : activeType === 'bar_rank' && series.length ? (
         <div className="overflow-x-auto">
           <svg
+            className="min-w-[360px]"
+            viewBox={"0 0 360 " + (20 + labels.length * 32)}
+            role="img"
+            aria-label={payload.title || '问数排名图'}
+          >
+            {labels.map((label, index) => {
+              const value = series[0]?.data?.[index] ?? 0
+              const barMax = 200
+              const barW = (value / (max || 1)) * barMax
+              const y = 10 + index * 32
+              return (
+                <g key={label}>
+                  <text
+                    x={80}
+                    y={y + 14}
+                    textAnchor="end"
+                    fontSize="10"
+                    fill="#374151"
+                  >
+                    <title>{label}</title>
+                    {label.length > 7 ? label.slice(0, 7) + '...' : label}
+                  </text>
+                  <rect
+                    x={90}
+                    y={y + 2}
+                    width={barW}
+                    height={18}
+                    rx="4"
+                    fill={chartColors[0]}
+                    opacity={0.86}
+                  />
+                  <text
+                    x={90 + barW + 6}
+                    y={y + 15}
+                    fontSize="10"
+                    fontWeight="600"
+                    fill="#374151"
+                  >
+                    {value}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+        </div>
+      ) : activeType === 'metric_card' && tableRows.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {tableRows.map((row, index) => {
+            const label = String(row[0] ?? '')
+            const value = row[1] != null ? String(row[1]) : '—'
+            const isPrimary = index === 0
+            return (
+              <div
+                key={index}
+                className={
+                  isPrimary
+                    ? 'rounded-lg border-2 border-[#4f83ff] bg-[#f0f5ff] px-4 py-3'
+                    : 'rounded-lg border border-[#e8eef8] bg-white px-4 py-3'
+                }
+              >
+                <div className="text-xs text-[#6b7280]">{label}</div>
+                <div
+                  className={
+                    isPrimary
+                      ? 'mt-1 text-2xl font-bold tabular-nums text-[#4f83ff]'
+                      : 'mt-1 text-xl font-semibold tabular-nums text-[#111827]'
+                  }
+                >
+                  {value}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : series.length ? (
+        <div className="overflow-x-auto">
+          {(() => {
+            const barLayout = activeType === 'bar' ? (() => {
+              const rawGroupWidth = chartWidth / Math.max(labels.length, 1)
+              const maxGroupWidth = 80
+              const groupWidth = Math.min(rawGroupWidth, maxGroupWidth)
+              const totalBarsWidth = groupWidth * labels.length
+              const barOffset = (chartWidth - totalBarsWidth) / 2
+              const barWidth = Math.min(Math.max((groupWidth * 0.72) / Math.max(series.length, 1), 8), 48)
+              return { groupWidth, barOffset, barWidth }
+            })() : null
+            return (<svg
             className="min-w-[360px]"
             viewBox={`0 0 ${chartWidth + axisLeft + 12} ${chartHeight + axisTop + axisLabelHeight}`}
             role="img"
@@ -949,37 +1192,55 @@ function ChatDbChart({ payload }: { payload: ChartPayload }) {
             >
               {max}
             </text>
+            {[0.25, 0.5, 0.75].map(ratio => (
+              <g key={ratio}>
+                <line
+                  x1={axisLeft}
+                  y1={axisTop + chartHeight * (1 - ratio)}
+                  x2={chartWidth + axisLeft}
+                  y2={axisTop + chartHeight * (1 - ratio)}
+                  stroke="#f3f4f6"
+                  strokeDasharray="4 3"
+                />
+                <text
+                  x={axisLeft - 8}
+                  y={axisTop + chartHeight * (1 - ratio) + 3}
+                  textAnchor="end"
+                  fontSize="10"
+                  fill="#d1d5db"
+                >
+                  {Math.round(max * ratio)}
+                </text>
+              </g>
+            ))}
             {series.map((item, seriesIndex) => {
               const color = chartColors[seriesIndex % chartColors.length]
-              if (activeType === 'bar') {
-                const groupWidth = chartWidth / Math.max(item.data.length, 1)
-                const barWidth = Math.max(
-                  (groupWidth * 0.72) / Math.max(series.length, 1),
-                  8
-                )
+              if (activeType === 'bar' && barLayout) {
+                const { groupWidth, barOffset, barWidth: clampedBarWidth } = barLayout
                 return item.data.map((value, index) => {
                   const height =
                     ((value - min) / (max - min || 1)) * chartHeight
                   const x =
                     axisLeft +
+                    barOffset +
                     index * groupWidth +
-                    (groupWidth - barWidth * series.length) / 2 +
-                    seriesIndex * barWidth
+                    (groupWidth - clampedBarWidth * series.length) / 2 +
+                    seriesIndex * clampedBarWidth
                   const y = axisTop + chartHeight - height
                   return (
                     <g key={`${seriesIndex}-${index}`}>
                       <rect
                         x={x}
                         y={y}
-                        width={barWidth}
+                        width={clampedBarWidth}
                         height={height}
-                        rx="4"
+                        rx="6"
                         fill={color}
-                        opacity={0.86}
+                        opacity={0.88}
                       />
                       <text
-                        x={x + barWidth / 2}
-                        y={Math.max(12, y - 7)}
+                        x={x + clampedBarWidth / 2}
+                        y={y - 5}
                         textAnchor="middle"
                         fontSize="10"
                         fontWeight="600"
@@ -992,22 +1253,34 @@ function ChatDbChart({ payload }: { payload: ChartPayload }) {
                 })
               }
 
+              const lineLayout = (() => {
+                const rawGroupWidth = chartWidth / Math.max(item.data.length, 1)
+                const maxGroupWidth = 80
+                const groupWidth = Math.min(rawGroupWidth, maxGroupWidth)
+                const totalWidth = groupWidth * item.data.length
+                const offsetX = (chartWidth - totalWidth) / 2
+                return { groupWidth, offsetX }
+              })()
               const path = buildLinePath(
                 item.data,
                 chartWidth,
                 chartHeight,
                 min,
-                max
+                max,
+                lineLayout.offsetX,
+                lineLayout.groupWidth
               )
               return (
-                <g key={seriesIndex} transform={`translate(${axisLeft} ${axisTop})`}>
+                <g
+                  key={seriesIndex}
+                  transform={`translate(${axisLeft} ${axisTop})`}
+                >
                   <path d={path} fill="none" stroke={color} strokeWidth="3" />
                   {item.data.map((value, index) => {
                     const span = max - min || 1
-                    const x =
-                      item.data.length === 1
-                        ? chartWidth / 2
-                        : (index / (item.data.length - 1)) * chartWidth
+                    const x = item.data.length === 1
+                      ? chartWidth / 2
+                      : lineLayout.offsetX + index * lineLayout.groupWidth + lineLayout.groupWidth / 2
                     const y = chartHeight - ((value - min) / span) * chartHeight
                     return (
                       <g key={index}>
@@ -1029,10 +1302,19 @@ function ChatDbChart({ payload }: { payload: ChartPayload }) {
               )
             })}
             {labels.map((label, index) => {
-              const x =
-                axisLeft + (index / Math.max(labels.length - 1, 1)) * chartWidth
+              const x = activeType === 'bar' && barLayout
+                ? axisLeft + barLayout.barOffset + index * barLayout.groupWidth + barLayout.groupWidth / 2
+                : (() => {
+                    const rawGW = chartWidth / Math.max(labels.length, 1)
+                    const maxGW = 80
+                    const gw = Math.min(rawGW, maxGW)
+                    const tw = gw * labels.length
+                    const ox = (chartWidth - tw) / 2
+                    return axisLeft + ox + index * gw + gw / 2
+                  })()
               const y = chartHeight + axisTop + 22
-              const lines = splitChartLabel(label)
+              const cleanLabel = label.replace(/[（(][\s\S]*?[）)]$/, '').trim()
+              const lines = splitChartLabel(cleanLabel)
               return (
                 <text
                   key={label}
@@ -1044,18 +1326,15 @@ function ChatDbChart({ payload }: { payload: ChartPayload }) {
                 >
                   <title>{label}</title>
                   {lines.map((line, lineIndex) => (
-                    <tspan
-                      key={lineIndex}
-                      x={x}
-                      dy={lineIndex === 0 ? 0 : 13}
-                    >
+                    <tspan key={lineIndex} x={x} dy={lineIndex === 0 ? 0 : 13}>
                       {line}
                     </tspan>
                   ))}
                 </text>
               )
             })}
-          </svg>
+          </svg>)
+          })()}
         </div>
       ) : null}
       {series.length > 1 ? (
@@ -1154,46 +1433,133 @@ function ClarifyOptions({
 
 function AnalysisDetails({
   title,
+  collapsedDefault,
+  items,
   children
 }: {
   title: string
+  collapsedDefault?: boolean
+  items?: string[]
   children: React.ReactNode
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(collapsedDefault !== false ? false : true)
   const Icon = expanded ? ChevronUp : ChevronDown
+  const isInsight = title.includes('洞察')
+  const borderColor = isInsight ? 'border-[#d4e0f7]' : 'border-[#cfe8b8]'
+  const bgColor = isInsight ? 'bg-[#f5f8ff]' : 'bg-[#f8fff2]'
+  const textColor = isInsight ? 'text-[#2563eb]' : 'text-[#2f7d32]'
+  const dividerColor = isInsight ? 'border-[#dce6f5]' : 'border-[#dff2d4]'
 
   return (
-    <section className="rounded-xl border border-[#cfe8b8] bg-[#f8fff2]">
+    <section className={`rounded-xl border ${borderColor} ${bgColor}`}>
       <button
         type="button"
         onClick={() => setExpanded(value => !value)}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left min-h-[40px]"
         aria-expanded={expanded}
       >
-        <span className="text-sm font-semibold text-[#2f7d32]">
+        <span className={`text-sm font-semibold ${textColor}`}>
           {expanded ? `收起${title}` : `展开${title}`}
         </span>
-        <Icon className="h-4 w-4 shrink-0 text-[#2f7d32]" />
+        <Icon className={`h-4 w-4 shrink-0 ${textColor}`} />
       </button>
       {expanded ? (
-        <div className="border-t border-[#dff2d4] px-3 py-3">
-          <div className="prose-sm prose-neutral max-w-none">{children}</div>
+        <div className={`border-t ${dividerColor} px-3 py-3`}>
+          {items && items.length > 0 ? (
+            <ul className="space-y-1.5">
+              {items.map((item, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-[#374151]">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-40" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="prose-sm prose-neutral max-w-none">{children}</div>
+          )}
         </div>
       ) : null}
     </section>
   )
 }
 
+function extractTablesFromThinking(frames?: ThinkingFrame[]): string[] {
+  if (!frames || frames.length === 0) return []
+  const tables = new Set<string>()
+  for (const frame of frames) {
+    const sql = frame.content
+    const fromMatches = sql.match(/\bFROM\s+`?(\w+)`?/gi)
+    if (fromMatches) {
+      for (const m of fromMatches) {
+        const name = m.replace(/\bFROM\s+`?/i, '').replace(/`$/, '')
+        if (name && !/select|where|and|or|group|order|having|limit|join|on|set|into|values/i.test(name)) {
+          tables.add(name)
+        }
+      }
+    }
+    const joinMatches = sql.match(/\bJOIN\s+`?(\w+)`?/gi)
+    if (joinMatches) {
+      for (const m of joinMatches) {
+        const name = m.replace(/\bJOIN\s+`?/i, '').replace(/`$/, '')
+        if (name) tables.add(name)
+      }
+    }
+  }
+  return [...tables]
+}
+
+function ThinkingProcess({ frames }: { frames: ThinkingFrame[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center gap-1 text-[14px] font-semibold text-[#ff6b2b]"
+      >
+        查看思考过程 <ChevronDown className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open ? (
+        <div className="mt-2 space-y-2 border-t border-[#eeeeee] pt-2">
+          {frames.map((frame, i) => (
+            <div key={i} className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm text-[#64748b]">
+              <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
+                {frame.content}
+              </pre>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function AssistantContent({
   content,
+  insightMeta,
+  insightCollapsedDefault,
   onClarify,
   trafficFilters,
-  onTrafficPresetChange
+  onTrafficPresetChange,
+  allDates,
+  userQuestion,
+  elapsedMs,
+  topic,
+  thinkingFrames,
+  tables
 }: {
   content: string
+  insightMeta?: InsightMeta
+  insightCollapsedDefault?: boolean
   onClarify: (value: string) => void
   trafficFilters?: TrafficFilters
   onTrafficPresetChange?: (preset: TrafficFilters['datePreset']) => void
+  allDates?: boolean
+  userQuestion?: string
+  elapsedMs?: number
+  topic?: string
+  thinkingFrames?: ThinkingFrame[]
+  tables?: string
 }) {
   const streamdownProps = useMemo<Partial<StreamdownProps>>(
     () => ({
@@ -1205,10 +1571,18 @@ function AssistantContent({
   const blocks = useMemo(() => parseRichContent(content), [content])
   const sections = useMemo(() => parseAnswerSections(content), [content])
 
+  const topN = useMemo(() => {
+    if (!userQuestion) return undefined
+    const m = userQuestion.match(/前\s*(\d+)\s*(名|位|个|名)?/)
+    if (m && m[1]) return parseInt(m[1], 10)
+    if (/排名|排行|对比|top/i.test(userQuestion)) return 5
+    return 5 // 移动端默认最多显示5条
+  }, [userQuestion])
+
   const renderBlocks = (sectionContent: string) =>
     parseRichContent(sectionContent).map((block, index) => {
       if (block.type === 'chart') {
-        return <ChatDbChart key={index} payload={block.payload} />
+        return <ChatDbChart key={index} payload={block.payload} topN={topN} />
       }
       if (block.type === 'clarify') {
         return (
@@ -1233,14 +1607,23 @@ function AssistantContent({
         parseRichContent(section.content).some(block => block.type === 'chart')
     )
 
+    const nonAnalysis = visibleSections.filter(s => s.kind !== 'analysis')
+    const analysisSections = visibleSections.filter(s => s.kind === 'analysis')
+    const orderedSections = [...nonAnalysis, ...analysisSections]
+
     return (
       <div className="space-y-3">
-        {visibleSections.map((section, index) => {
-          if (section.kind === 'analysis') {
+        {orderedSections.map((section, index) => {
+          if (section.kind === 'analysis' || section.kind === 'insight') {
+            const metaItems = section.kind === 'insight' ? insightMeta?.keyPoints
+              : section.title.includes('建议') ? insightMeta?.suggestions
+              : insightMeta?.impacts
             return (
               <AnalysisDetails
                 key={`${section.kind}-${index}`}
                 title={section.title}
+                collapsedDefault={insightCollapsedDefault}
+                items={metaItems}
               >
                 {renderBlocks(section.content)}
               </AnalysisDetails>
@@ -1250,9 +1633,7 @@ function AssistantContent({
           const sectionClass =
             section.kind === 'conclusion'
               ? 'border-[#b9dcff] bg-[#eff8ff] text-left'
-              : section.kind === 'insight'
-                ? 'border-[#e5e7eb] bg-white'
-                : 'border-[#e8eef8] bg-white'
+              : 'border-[#e8eef8] bg-white'
 
           return (
             <section
@@ -1271,7 +1652,8 @@ function AssistantContent({
                 <span>{section.title}</span>
                 {section.kind === 'visualization' &&
                 trafficFilters &&
-                onTrafficPresetChange ? (
+                onTrafficPresetChange &&
+                !allDates ? (
                   <TrafficDatePresetControl
                     value={trafficFilters.datePreset}
                     onChange={onTrafficPresetChange}
@@ -1290,6 +1672,12 @@ function AssistantContent({
             </section>
           )
         })}
+        {elapsedMs != null && (
+          <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
+            <span>数据来源：{tables ? tables.split(",").join("、") : '数据表'}</span>
+            <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
+          </div>
+        )}
       </div>
     )
   }
@@ -1298,7 +1686,7 @@ function AssistantContent({
     <div className="prose-sm prose-neutral max-w-none">
       {blocks.map((block, index) => {
         if (block.type === 'chart') {
-          return <ChatDbChart key={index} payload={block.payload} />
+          return <ChatDbChart key={index} payload={block.payload} topN={topN} />
         }
         if (block.type === 'clarify') {
           return (
@@ -1315,6 +1703,12 @@ function AssistantContent({
           </Streamdown>
         )
       })}
+      {elapsedMs != null && (
+        <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
+          <span>数据来源：{tables ? tables.split(",").join("、") : '数据表'}</span>
+          <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -1362,7 +1756,7 @@ function formatMajorCaseAnalysis(payload: MajorCaseAnalysis) {
     `所属区域：${item.region || '暂无'}`,
     `案件类型：${item.caseType || '暂无'}`,
     `当前环节：${item.pendingStep || '暂无'}`,
-    `综合评分：${item.totalScore ?? 0}（影响度${item.impactScore ?? 0}，处置难度${item.difficultyScore ?? 0}）`,
+    `综合评分：${item.totalScore ?? 0}（影响度${item.impactScore ?? 0}，处置难度${item.difficultyScore ?? 0}，时效风险${item.timeRiskScore ?? 0}），等级：${item.level || '暂无'}`,
     ''
   ]
 
@@ -1370,6 +1764,16 @@ function formatMajorCaseAnalysis(payload: MajorCaseAnalysis) {
     lines.push('判断依据：')
     payload.basis.forEach(reason => {
       lines.push(`- ${reason}`)
+    })
+  }
+
+  const suggestions = payload.suggestion?.length
+    ? payload.suggestion
+    : item.suggestion || []
+  if (suggestions.length) {
+    lines.push('', '处置建议：')
+    suggestions.forEach(suggestion => {
+      lines.push(`- ${suggestion}`)
     })
   }
 
@@ -1449,7 +1853,8 @@ function formatTrafficAggregateAnswer(
   const inCount = summary.inCount || 0
   const outCount = summary.outCount || 0
   const hkMacauCount = summary.hkMacauCount || 0
-  const mainlandCount = summary.mainlandCount || Math.max(total - hkMacauCount, 0)
+  const mainlandCount =
+    summary.mainlandCount || Math.max(total - hkMacauCount, 0)
   const hkMacauRatio =
     typeof summary.hkMacauRatio === 'number'
       ? (summary.hkMacauRatio * 100).toFixed(2)
@@ -1513,7 +1918,9 @@ function formatTrafficAggregateAnswer(
     '## 精准结论',
     '',
     `${range}，${target}车流量共 ${total} 辆，其中进方向 ${inCount} 辆、出方向 ${outCount} 辆，港澳车辆 ${hkMacauCount} 辆，占比 ${hkMacauRatio}%。`,
-    top ? `车流最高维度为「${top.name || '未知'}」，共 ${top.total || 0} 辆。` : '',
+    top
+      ? `车流最高维度为「${top.name || '未知'}」，共 ${top.total || 0} 辆。`
+      : '',
     '',
     '## 特征洞察',
     '',
@@ -1553,7 +1960,7 @@ async function answerTrafficAggregateQuestion(
     params.set('holiday', 'true')
   }
 
-  const response = await fetch(`/api/chatdb/traffic/aggregate?${params}`)
+  const response = await fetch(`/api/chatdb/traffic/aggregate?${params}`, { credentials: 'include' })
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error(payload?.message || '车流统计查询失败')
@@ -1727,16 +2134,26 @@ function TrafficFilterPanel({
   )
 }
 
-export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
+export function AskNumberChat({
+  initialAlertId = 0,
+  initialAutoAsk = false,
+  initialQuestion = '',
+  initialTopic
+}: {
+  initialAlertId?: number
+  initialAutoAsk?: boolean
+  initialQuestion?: string
+  initialTopic: string
+}) {
   const [topic] = useState(initialTopic)
   const [input, setInput] = useState(() => {
     if (typeof window === 'undefined') return ''
-    return (
-      new URLSearchParams(window.location.search).get('q')?.slice(0, 100) || ''
-    )
+    return initialQuestion.slice(0, 100)
   })
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([])
+  const [inputPlaceholder, setInputPlaceholder] = useState('')
   const [loading, setLoading] = useState(false)
   const [storageReady, setStorageReady] = useState(false)
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(
@@ -1750,6 +2167,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
     defaultTrafficFilters()
   )
   const abortRef = useRef<AbortController | null>(null)
+  const autoAskRef = useRef(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const topicLabel = useMemo(() => topicLabels[topic] || '问数', [topic])
@@ -1809,11 +2227,61 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  useEffect(() => {
+    if (!storageReady || sessionId) return
+    let active = true
+
+    async function createSession() {
+      try {
+        const response = await fetch('/api/chatdb/chats/sessions', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic,
+            source: initialAlertId ? 'topic_alert' : 'topic_entry',
+            alertId: initialAlertId
+          })
+        })
+        const payload = await response.json().catch(() => null)
+        const data = unwrapChatDbData<{
+          sessionId?: string
+          suggestedQuestions?: string[]
+          inputPlaceholder?: string
+        }>(payload)
+        if (active && response.ok && data?.sessionId) {
+          setSessionId(data.sessionId)
+          if (data.suggestedQuestions?.length) {
+            setSuggestedQuestions(data.suggestedQuestions)
+          }
+          if (data.inputPlaceholder) {
+            setInputPlaceholder(data.inputPlaceholder)
+          }
+        }
+      } catch {
+        // Session creation failed — show error so user knows something went wrong.
+        // Chat requests can still create a session via the backend's auto-create,
+        // but the user should be aware of the initialization failure.
+        if (active) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: '会话初始化失败，部分功能可能受限。请尝试刷新页面。'
+          }])
+        }
+      }
+    }
+
+    createSession()
+    return () => {
+      active = false
+    }
+  }, [initialAlertId, sessionId, storageReady, topic])
+
   const refreshTrafficStatus = useCallback(async () => {
     if (topic !== 'traffic') return
     setTrafficStatusLoading(true)
     try {
-      const response = await fetch('/api/chatdb/traffic/ingest/status')
+      const response = await fetch('/api/chatdb/traffic/ingest/status', { credentials: 'include' })
       const payload = await response.json().catch(() => null)
       const data = unwrapChatDbData<TrafficIngestStatus>(payload)
       if (response.ok && data) {
@@ -1828,7 +2296,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
     if (topic !== 'traffic') return
     const timer = window.setTimeout(() => {
       refreshTrafficStatus()
-      fetch('/api/chatdb/traffic/devices')
+      fetch('/api/chatdb/traffic/devices', { credentials: 'include' })
         .then(response => response.json())
         .then(payload => {
           const data = unwrapChatDbData<{ list?: TrafficDevice[] }>(payload)
@@ -1847,7 +2315,8 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
 
   const submit = async (
     forcedQuestion?: string,
-    trafficFiltersOverride?: TrafficFilters
+    trafficFiltersOverride?: TrafficFilters,
+    meta?: { alertId?: number; source?: string }
   ) => {
     const question = (forcedQuestion || input).trim().slice(0, 100)
     if (!question) return
@@ -1878,10 +2347,11 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
     abortRef.current = controller
     setInput('')
     setLoading(true)
+    const requestStart = Date.now()
     setMessages(prev => [
       ...prev,
       { role: 'user', content: question },
-      { role: 'assistant', content: '' }
+      { role: 'assistant', content: '', metadata: { startTime: requestStart } }
     ])
 
     try {
@@ -1891,7 +2361,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
         })
         const response = await fetch(
           `/api/chatdb/grid/major-case-analysis?${params.toString()}`,
-          { signal: controller.signal }
+          { signal: controller.signal, credentials: 'include' }
         )
         const payload = await response.json().catch(() => null)
         if (!response.ok) {
@@ -1912,14 +2382,17 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
         return
       }
 
-      const response = await fetch('/api/question-chat', {
+      const response = await fetch('/api/chatdb/chats', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topic,
           message: outboundQuestion,
           context: contextMessages,
-          sessionId
+          sessionId,
+          source: meta?.source || '',
+          alertId: meta?.alertId || 0
         }),
         signal: controller.signal
       })
@@ -1928,49 +2401,72 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
         throw new Error(await response.text())
       }
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const raw = line.slice(6).trim()
-          if (!raw || raw === '[DONE]') continue
-
-          try {
-            const event = JSON.parse(raw)
-            if (
-              event.event === 'start' &&
-              typeof event.data?.sessionId === 'string'
-            ) {
-              setSessionId(event.data.sessionId)
-            }
-            if (event.event === 'message' && event.content) {
-              setMessages(prev => {
-                const next = [...prev]
-                const last = next[next.length - 1]
-                if (last?.role === 'assistant') {
-                  next[next.length - 1] = {
-                    ...last,
-                    content: last.content + event.content
-                  }
-                }
-                return next
-              })
-            }
-          } catch {
-            // Ignore non-JSON SSE fragments from upstream.
-          }
+      await readSSEStream(response.body, event => {
+        if (event.event === 'start' && typeof (event.data as Record<string, unknown>)?.sessionId === 'string') {
+          setSessionId((event.data as Record<string, unknown>).sessionId as string)
         }
-      }
+        if (event.event === 'fast_path') {
+          setMessages(prev => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = {
+                ...last,
+                metadata: {
+                  fastPath: (event.fastPath as boolean) ?? true,
+                  format: (event.format ?? (event.data as Record<string, unknown>)?.format) as FastPathFormat | undefined,
+                  insightMeta: (((event.data as Record<string, unknown>)?.format ?? (event.format as Record<string, unknown>)) as Record<string, unknown> | undefined)?.insightMeta as Record<string, unknown> | undefined,
+                  allDates: ((event.data as Record<string, unknown>)?.allDates ?? event.allDates) as boolean | undefined,
+                  hybrid: ((event.data as Record<string, unknown>)?.hybrid ?? event.hybrid) as boolean | undefined
+                }
+              }
+            }
+            return next
+          })
+        }
+        if (event.event === 'thinking' && event.content) {
+          setMessages(prev => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              const frames = [...(last.thinkingFrames || []), { content: event.content!, timestamp: Date.now() }]
+              next[next.length - 1] = { ...last, thinkingFrames: frames }
+            }
+            return next
+          })
+        }
+        if (event.event === 'message' && event.content) {
+          setMessages(prev => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = { ...last, content: last.content + event.content }
+            }
+            return next
+          })
+        }
+        if (event.event === 'tables' && event.content) {
+          setMessages(prev => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = { ...last, metadata: { ...last.metadata, tables: event.content } }
+            }
+            return next
+          })
+        }
+        if (event.event === 'error' && (event.data as Record<string, unknown>)?.message as string | undefined) {
+          const msg = (event.data as Record<string, unknown>).message as string
+          setMessages(prev => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = { ...last, content: last.content ? last.content + '\n\n⚠ ' + msg : '⚠ ' + msg }
+            }
+            return next
+          })
+        }
+      })
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
         setMessages(prev => {
@@ -1980,7 +2476,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
             next[next.length - 1] = {
               role: 'assistant',
               content:
-                '问数服务暂时不可用，请确认 Go 后端已启动，并已配置 CHATDB_API_BASE 与 CHATDB_JWT_TOKEN。'
+                '问数服务暂时不可用，请稍后重试或联系管理员。'
             }
           }
           return next
@@ -1991,8 +2487,35 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
         abortRef.current = null
       }
       setLoading(false)
+      setMessages(prev => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.role === 'assistant' && last.metadata?.startTime) {
+          next[next.length - 1] = {
+            ...last,
+            metadata: { ...last.metadata, elapsedMs: Date.now() - last.metadata.startTime }
+          }
+        }
+        return next
+      })
     }
   }
+
+  useEffect(() => {
+    if (!storageReady || !initialAutoAsk || autoAskRef.current) return
+    const question = initialQuestion.trim().slice(0, 100)
+    if (!question) return
+    autoAskRef.current = true
+    const timer = window.setTimeout(() => {
+      submit(question, undefined, {
+        alertId: initialAlertId,
+        source: 'alert_click'
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
+    // submit intentionally stays out of the deps so the alert auto-ask fires once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAlertId, initialAutoAsk, initialQuestion, storageReady])
 
   const resetConversation = async () => {
     const currentSessionId = sessionId
@@ -2005,9 +2528,10 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
     }
     if (currentSessionId) {
       await fetch(
-        `/api/question-chat/session/${encodeURIComponent(currentSessionId)}/reset`,
+        `/api/chatdb/chats/sessions/${encodeURIComponent(currentSessionId)}/reset`,
         {
-          method: 'POST'
+          method: 'POST',
+          credentials: 'include'
         }
       ).catch(() => undefined)
     }
@@ -2044,8 +2568,9 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
         trafficDevices
       )
       const contextMessages = messages
-        .filter((message, index) =>
-          index !== presetAssistantIndex && message.content.trim()
+        .filter(
+          (message, index) =>
+            index !== presetAssistantIndex && message.content.trim()
         )
         .slice(-10)
         .map(message => ({
@@ -2063,8 +2588,9 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
       )
 
       try {
-        const response = await fetch('/api/question-chat', {
+        const response = await fetch('/api/chatdb/chats', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             topic,
@@ -2079,45 +2605,20 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
           throw new Error(await response.text())
         }
 
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const raw = line.slice(6).trim()
-            if (!raw || raw === '[DONE]') continue
-
-            try {
-              const event = JSON.parse(raw)
-              if (
-                event.event === 'start' &&
-                typeof event.data?.sessionId === 'string'
-              ) {
-                setSessionId(event.data.sessionId)
-              }
-              if (event.event === 'message' && event.content) {
-                setMessages(prev =>
-                  prev.map((message, index) =>
-                    index === presetAssistantIndex
-                      ? { ...message, content: message.content + event.content }
-                      : message
-                  )
-                )
-              }
-            } catch {
-              // Ignore non-JSON SSE fragments from upstream.
-            }
+        await readSSEStream(response.body, event => {
+          if (event.event === 'start' && typeof (event.data as Record<string, unknown>)?.sessionId === 'string') {
+            setSessionId((event.data as Record<string, unknown>).sessionId as string)
           }
-        }
+          if (event.event === 'message' && event.content) {
+            setMessages(prev =>
+              prev.map((message, index) =>
+                index === presetAssistantIndex
+                  ? { ...message, content: message.content + event.content }
+                  : message
+              )
+            )
+          }
+        })
       } catch (error) {
         if ((error as Error).name !== 'AbortError') {
           setMessages(prev =>
@@ -2138,58 +2639,6 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
       return
     }
 
-    /*
-    if (loading) return
-
-    const userIndex = [...messages]
-      .map((message, index) => ({ message, index }))
-      .reverse()
-      .find(item => item.message.role === 'user')?.index
-    if (userIndex === undefined) return
-
-    const assistantIndex = messages.findIndex(
-      (message, index) => index > userIndex && message.role === 'assistant'
-    )
-    if (assistantIndex < 0) return
-
-    const question = messages[userIndex].content
-    setLoading(true)
-    setMessages(prev =>
-      prev.map((message, index) =>
-        index === assistantIndex
-          ? { ...message, content: '正在按新的时间范围查询...' }
-          : message
-      )
-    )
-
-    try {
-      const answer = await answerTrafficAggregateQuestion(
-        question,
-        nextFilters,
-        trafficDevices
-      )
-      setMessages(prev =>
-        prev.map((message, index) =>
-          index === assistantIndex
-            ? {
-                ...message,
-                content: answer || '当前时间范围暂无可展示的车流统计结果。'
-              }
-            : message
-        )
-      )
-    } catch {
-      setMessages(prev =>
-        prev.map((message, index) =>
-          index === assistantIndex
-            ? { ...message, content: '车流统计刷新失败，请稍后重试。' }
-            : message
-        )
-      )
-    } finally {
-      setLoading(false)
-    }
-    */
   }
 
   const copyAnswer = async (content: string) => {
@@ -2272,13 +2721,15 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
                 请输入想了解的{topicLabel}问题
               </h2>
               <p className="mt-4 text-[#8b8f99]">
-                {topic === 'traffic'
-                  ? '例如：今天各卡口车流量、过去一周车流趋势、港澳车占比'
-                  : '例如：过去一周人流对比、网格内影响最大的案件、粤C是哪里的车牌'}
+                {topic === 'grid'
+                  ? '例如：网格内影响最大的案件、各社区结案率排名、本周网格事件趋势'
+                  : topic === 'population'
+                    ? '例如：今天人流的年龄分布、进站来源地排名、活力指数、流动人口异常'
+                    : '例如：今天各卡口车流量、过去一周车流趋势、港澳车占比'}
               </p>
-              {topic === 'traffic' ? (
+              {topic === 'traffic' || suggestedQuestions.length > 0 ? (
                 <div className="mx-auto mt-6 flex max-w-[420px] flex-wrap justify-center gap-2">
-                  {trafficRecommendedQuestions.map(question => (
+                  {(suggestedQuestions.length > 0 ? suggestedQuestions : trafficRecommendedQuestions).slice(0, 5).map(question => (
                     <button
                       key={question}
                       type="button"
@@ -2304,9 +2755,14 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
                 >
                   {message.role === 'assistant' ? (
                     <>
+                      {message.thinkingFrames && message.thinkingFrames.length > 0 ? (
+                        <ThinkingProcess frames={message.thinkingFrames} />
+                      ) : null}
                       {message.content ? (
                         <AssistantContent
                           content={message.content}
+                          insightMeta={message.metadata?.insightMeta}
+                          insightCollapsedDefault={message.metadata?.format?.insightCollapsedDefault}
                           onClarify={option => submit(option)}
                           trafficFilters={
                             topic === 'traffic' ? trafficFilters : undefined
@@ -2316,6 +2772,12 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
                               ? changeTrafficPreset
                               : undefined
                           }
+                          allDates={message.metadata?.allDates}
+                          userQuestion={messages.slice(0, index).reverse().find(m => m.role === 'user')?.content}
+                          elapsedMs={message.metadata?.elapsedMs}
+                          topic={topic}
+                          thinkingFrames={message.thinkingFrames}
+                          tables={message.metadata?.tables}
                         />
                       ) : loading ? (
                         '正在查询...'
@@ -2354,7 +2816,7 @@ export function AskNumberChat({ initialTopic }: { initialTopic: string }) {
           value={input}
           loading={loading}
           topic={topic}
-          placeholder={`输入${topicLabel}问题，最多100字`}
+          placeholder={inputPlaceholder || `输入${topicLabel}问题，最多100字`}
           onChange={setInput}
           onSubmit={submit}
           onStop={stop}

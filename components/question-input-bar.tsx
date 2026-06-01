@@ -111,8 +111,9 @@ export function QuestionInputBar({
       formData.append('topic', topic)
       formData.append('durationMs', String(Math.round(durationMs)))
 
-      const response = await fetch('/api/question-chat/speech', {
+      const response = await fetch('/api/chatdb/speech/transcribe', {
         method: 'POST',
+        credentials: 'include',
         body: formData
       })
       const payload = await response.json().catch(() => null)
@@ -251,7 +252,7 @@ export function QuestionInputBar({
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
-    textarea.style.height = '40px'
+    textarea.style.height = '44px'
     textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`
   }, [value, recording, transcribing])
 
@@ -291,7 +292,7 @@ export function QuestionInputBar({
       onSubmit={submit}
       className="shrink-0 border-t border-[#eeeeee] bg-white p-4"
     >
-      <div className="grid min-h-[72px] grid-cols-[44px_minmax(0,1fr)_52px_48px] items-center gap-3 rounded-2xl border border-[#e5e5e5] px-4 py-3">
+      <div className="grid grid-cols-[44px_minmax(0,1fr)_52px_48px] items-center gap-3 rounded-2xl border border-[#e5e5e5] px-4 py-3">
         <button
           type="button"
           onClick={recording ? stopRecording : startRecording}
@@ -325,7 +326,7 @@ export function QuestionInputBar({
           onChange={event => onChange(event.target.value.slice(0, maxLength))}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="block max-h-[120px] min-h-10 w-full resize-none overflow-y-auto bg-transparent py-2 text-base leading-6 outline-none placeholder:text-[#9ca3af] disabled:text-[#9ca3af]"
+          className="block h-[44px] max-h-[120px] w-full resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none placeholder:text-[#9ca3af] disabled:text-[#9ca3af]"
         />
         <span className="text-center text-xs tabular-nums text-[#999]">
           {value.length}/{maxLength}

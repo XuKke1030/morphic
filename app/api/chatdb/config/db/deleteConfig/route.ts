@@ -4,21 +4,19 @@ import { chatDbFetch } from '@/lib/chatdb/server'
 
 export const runtime = 'nodejs'
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params
+export async function DELETE(request: NextRequest) {
   const search = request.nextUrl.search
   const upstream = await chatDbFetch(
     request,
-    `/api/v1/qa/documents/${encodeURIComponent(id)}/view${search}`
+    `/api/v1/config/db/deleteConfig${search}`,
+    { method: 'DELETE' }
   )
 
   return new Response(await upstream.text(), {
     status: upstream.status,
     headers: {
-      'Content-Type': upstream.headers.get('Content-Type') || 'application/json'
+      'Content-Type':
+        upstream.headers.get('Content-Type') || 'application/json'
     }
   })
 }

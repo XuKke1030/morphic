@@ -25,12 +25,32 @@ export async function POST(request: NextRequest) {
     const json = JSON.parse(payload)
     const token = json?.data?.token || json?.token
     if (token) {
+      let expireMs = json?.data?.expire || json?.expire
+      // Normalize: if expire looks like seconds (value < 1e12), convert to ms
+      if (expireMs && expireMs < 1e12) {
+        expireMs = expireMs * 1000
+      }
+      // Align cookie maxAge with backend JWT expiry (admin = 8h)
+      const maxAge = expireMs
+        ? Math.max(1, Math.floor((expireMs - Date.now()) / 1000))
+        : 8 * 60 * 60
       response.cookies.set('chatdb_admin_token', token, {
         httpOnly: true,
         sameSite: 'lax',
-        path: '/admin',
-        maxAge: 60 * 60 * 24 * 7
+        path: '/',
+        maxAge
       })
+      // Also set user token cookie so admin can access user-scoped endpoints (e.g. QA sync)
+      // Restrict path to /api/chatdb/admin/sync so it doesn't leak into user-side requests
+      const userToken = json?.data?.userToken
+      if (userToken) {
+        response.cookies.set('chatdb_token', userToken, {
+          httpOnly: true,
+          sameSite: 'lax',
+          path: '/api/chatdb/admin/sync',
+          maxAge
+        })
+      }
     }
   } catch {
     // Keep upstream response unchanged if it is not JSON.

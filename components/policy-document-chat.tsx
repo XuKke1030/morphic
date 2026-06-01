@@ -3,11 +3,15 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { DocumentViewer } from './document-viewer'
+import { readSSEStream } from '@/lib/chatdb/sse'
+
 import {
   ArrowLeft,
   Brain,
   ChevronDown,
   Check,
+  Copy,
   FileText,
   Globe2,
   X
@@ -20,6 +24,10 @@ type KnowledgeBase = {
   code: string
   name: string
   enabled: boolean
+  documentCount?: number
+  isDefault?: boolean
+  emptyReason?: string
+  docType?: string
 }
 
 type PopularQuestion = {
@@ -30,11 +38,27 @@ type PopularQuestion = {
   source?: string
 }
 
+type AnswerSectionKind = 'conclusion' | 'evidence' | 'supplement' | 'suggestion'
+
+type AnswerSection = {
+  kind: AnswerSectionKind
+  title: string
+  content: string
+}
+
+type ClarifyPayload = {
+  question?: string
+  options?: string[]
+}
+
 type Message = {
   role: 'user' | 'assistant'
   content: string
   frames?: StreamFrame[]
   citations?: CitationSource[]
+  sections?: AnswerSection[]
+  currentSectionKind?: AnswerSectionKind
+  clarification?: ClarifyPayload
 }
 
 type StreamFrame = {
@@ -54,6 +78,8 @@ type CitationSource = {
   page: number
   anchor: string
   content: string
+  effectiveDate?: string
+  repealedBy?: string
 }
 
 type ApiEnvelope<T> = {
@@ -71,6 +97,10 @@ type StoredConversation = {
 const storagePrefix = 'chatdb:qa-document-session'
 const documentQuestionMaxLength = 100
 
+function linkifyCitations(text: string): string {
+  return text.replace(/\[(\d+)\]/g, '<sup><a href="#" class="citation-marker" data-citation="$1">[$1]</a></sup>')
+}
+
 function pickList<T>(payload: ApiEnvelope<{ list?: T[] }> | { list?: T[] } | null) {
   if (!payload) return []
   if ('data' in payload) return payload.data?.list || []
@@ -78,7 +108,7 @@ function pickList<T>(payload: ApiEnvelope<{ list?: T[] }> | { list?: T[] } | nul
 }
 
 async function fetchJson<T>(url: string, signal?: AbortSignal) {
-  const response = await fetch(url, { signal })
+  const response = await fetch(url, { signal, credentials: 'include' })
   if (!response.ok) {
     throw new Error(await response.text().catch(() => '请求失败'))
   }
@@ -100,6 +130,20 @@ function frameTitle(frame: StreamFrame) {
   if (frame.event === 'retrieval') return '知识库召回'
   if (frame.event === 'message') return '生成回答'
   return frame.event || '数据帧'
+}
+
+const sectionKindFromEvent: Record<string, AnswerSectionKind> = {
+  conclusion: 'conclusion',
+  evidence: 'evidence',
+  supplement: 'supplement',
+  suggestion: 'suggestion'
+}
+
+const sectionTitleFromKind: Record<AnswerSectionKind, string> = {
+  conclusion: '核心结论',
+  evidence: '关键依据',
+  supplement: '补充说明',
+  suggestion: '后续建议'
 }
 
 function formatFrame(frame: StreamFrame) {
@@ -142,7 +186,9 @@ function citationFromFrame(frame: StreamFrame): CitationSource | null {
     fileName: asText(data.fileName),
     page: asNumber(data.page),
     anchor: asText(data.anchor),
-    content: asText(data.content)
+    content: asText(data.content),
+    effectiveDate: asText(data.effectiveDate),
+    repealedBy: asText(data.repealedBy)
   }
 }
 
@@ -152,12 +198,41 @@ function sessionIdFromFrame(frame: StreamFrame) {
   return asText(data?.sessionId)
 }
 
-function ConversationMessage({ message }: { message: Message }) {
+function ConversationMessage({ message, onViewDocument, onClarify }: { message: Message; onViewDocument: (documentId: number, focusSegmentId?: number) => void; onClarify: (value: string) => void }) {
   const [open, setOpen] = useState(false)
+  const [citationsOpen, setCitationsOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const processFrames = (message.frames || []).filter(
     frame => frame.event && frame.event !== 'message' && frame.event !== 'citation'
+      && frame.event !== 'conclusion' && frame.event !== 'evidence'
+      && frame.event !== 'supplement' && frame.event !== 'suggestion'
+      && frame.event !== 'section_start'
+      && frame.event !== 'clarification'
   )
-  const citations = message.citations || []
+  const citations = (message.citations || []).slice().sort((a, b) => a.index - b.index)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const link = target.closest('a.citation-marker') as HTMLAnchorElement | null
+      if (!link) return
+      e.preventDefault()
+      const idx = Number(link.dataset.citation)
+      if (idx > 0) setCitationsOpen(true)
+    }
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [])
+
+  const handleCopy = () => {
+    const text = message.sections && message.sections.length > 0
+      ? message.sections.map(s => `【${s.title}】\n${s.content}`).join('\n\n')
+      : message.content
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   if (message.role === 'user') {
     return (
@@ -169,6 +244,7 @@ function ConversationMessage({ message }: { message: Message }) {
 
   return (
     <div className="mr-auto w-fit max-w-[92%] rounded-[22px] border border-[#ededed] bg-white px-5 py-4 text-[#111827] shadow-sm">
+      <style>{`.citation-marker{color:#3b82f6;font-weight:600;text-decoration:none;cursor:pointer;font-size:0.75em}.citation-marker:hover{color:#1d4ed8}`}</style>
       {processFrames.length ? (
         <button
           type="button"
@@ -194,37 +270,106 @@ function ConversationMessage({ message }: { message: Message }) {
         </div>
       ) : null}
 
-      <div className="prose prose-neutral max-w-none text-[16px] leading-8">
-        {message.content ? <Streamdown>{message.content}</Streamdown> : '正在查询...'}
+      <div className="space-y-4">
+        {message.sections && message.sections.length > 0 ? (
+          message.sections.map((section, i) => (
+            <div key={i} className={
+              section.kind === 'conclusion' ? 'rounded-xl border border-[#d4e0f7] bg-[#f5f8ff] px-4 py-3'
+              : section.kind === 'evidence' ? 'rounded-xl border border-[#cfe8b8] bg-[#f8fff2] px-4 py-3'
+              : section.kind === 'suggestion' ? 'rounded-xl border border-[#fde8d0] bg-[#fff9f2] px-4 py-3'
+              : 'rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-4 py-3'
+            }>
+              <div className="mb-2 text-[13px] font-semibold text-[#6b7280]">{section.title}</div>
+              <div className="prose prose-neutral max-w-none text-[15px] leading-7">
+                {section.content ? <Streamdown>{linkifyCitations(section.content)}</Streamdown> : '正在生成...'}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="prose prose-neutral max-w-none text-[16px] leading-8">
+            {message.content ? <Streamdown>{linkifyCitations(message.content)}</Streamdown> : '正在查询...'}
+          </div>
+        )}
+
+        {message.clarification && message.clarification.options?.length ? (
+          <div className="my-3 rounded-xl border border-[#ffe0d4] bg-[#fff7f4] p-3">
+            <div className="text-sm font-semibold text-[#111827]">
+              {message.clarification.question || '请选择更明确的查询口径'}
+            </div>
+            <div className="mt-3 grid gap-2">
+              {message.clarification.options.slice(0, 5).map(option => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => onClarify(option)}
+                  className="rounded-lg border border-[#ffd0bd] bg-white px-3 py-2 text-left text-sm text-[#1f2937]"
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 text-xs text-[#9ca3af]">都不准确重新输入即可</div>
+          </div>
+        ) : null}
       </div>
 
-      {citations.length ? (
-        <div className="mt-5 border-t border-[#eeeeee] pt-4">
-          <div className="mb-3 text-[14px] font-semibold text-[#6b7280]">引用来源</div>
-          <div className="space-y-2">
-            {citations.map(citation => (
-              <a
-                key={citation.citationId}
-                href={`/api/chatdb/qa/citations/${citation.citationId}`}
-                target="_blank"
-                rel="noreferrer"
-                className="block rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-3 py-3 text-left transition hover:border-[#cbd5e1] hover:bg-white"
-              >
-                <div className="flex items-center gap-2 text-[14px] font-semibold text-[#374151]">
-                  <FileText className="h-4 w-4 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">
-                    [{citation.index}] {citation.documentTitle || citation.fileName || '引用文档'}
-                  </span>
-                  {citation.page ? (
-                    <span className="shrink-0 text-[12px] text-[#9ca3af]">第 {citation.page} 页</span>
-                  ) : null}
-                </div>
-                <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-[#6b7280]">
-                  {citation.content}
-                </p>
-              </a>
-            ))}
-          </div>
+      <div className="mt-4 flex items-center justify-between border-t border-[#eeeeee] pt-3">
+        {citations.length ? (
+          <button
+            type="button"
+            onClick={() => setCitationsOpen(v => !v)}
+            className="inline-flex items-center gap-1 text-[14px] font-medium text-[#6b7280] transition hover:text-[#374151]"
+          >
+            <FileText className="h-4 w-4" />
+            参考资料({citations.length})
+            <ChevronDown className={`h-3.5 w-3.5 transition ${citationsOpen ? 'rotate-180' : ''}`} />
+          </button>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1 text-[14px] text-[#9ca3af] transition hover:text-[#374151]"
+        >
+          {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+        </button>
+      </div>
+
+      {citationsOpen && citations.length ? (
+        <div className="mt-3 space-y-2 border-t border-[#eeeeee] pt-3">
+          {citations.map(citation => (
+            <button
+              key={citation.citationId}
+              type="button"
+              onClick={() => onViewDocument(
+                citation.documentId,
+                citation.anchor?.split('-').pop() ? Number(citation.anchor!.split('-').pop()) : undefined
+              )}
+              className="block w-full rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-3 py-3 text-left transition hover:border-[#cbd5e1] hover:bg-white"
+            >
+              <div className="flex items-center gap-2 text-[14px] font-semibold text-[#374151]">
+                <FileText className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  [{citation.index}] {citation.documentTitle || citation.fileName || '引用文档'}
+                </span>
+                {citation.repealedBy ? (
+                  <span className="shrink-0 rounded-full bg-[#fef2f2] px-2 py-0.5 text-[11px] font-medium text-[#dc2626]">已废止</span>
+                ) : citation.effectiveDate ? (
+                  <span className="shrink-0 rounded-full bg-[#f0fdf4] px-2 py-0.5 text-[11px] font-medium text-[#16a34a]">生效 {citation.effectiveDate}</span>
+                ) : null}
+                {citation.page ? (
+                  <span className="shrink-0 text-[12px] text-[#9ca3af]">第 {citation.page} 页</span>
+                ) : null}
+              </div>
+              <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-[#6b7280]">
+                {citation.content}
+              </p>
+              {citation.repealedBy ? (
+                <p className="mt-1 text-[11px] text-[#dc2626]">被「{citation.repealedBy}」废止</p>
+              ) : null}
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -235,6 +380,7 @@ export function PolicyDocumentChat() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [knowledgeCode, setKnowledgeCode] = useState('')
   const [questions, setQuestions] = useState<PopularQuestion[]>([])
+  const [exampleQuestions, setExampleQuestions] = useState<string[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [sessionId, setSessionId] = useState('')
   const [input, setInput] = useState('')
@@ -244,6 +390,8 @@ export function PolicyDocumentChat() {
   const [deepThinking, setDeepThinking] = useState(false)
   const [webSearch, setWebSearch] = useState(false)
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false)
+  const [viewerDoc, setViewerDoc] = useState<{ documentId: number; focusSegmentId?: number } | null>(null)
+  const [welcomeMessage, setWelcomeMessage] = useState('')
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -287,10 +435,15 @@ export function PolicyDocumentChat() {
         const list = pickList<KnowledgeBase>(payload).filter((item: KnowledgeBase) => item.enabled)
         setKnowledgeBases(list)
         setKnowledgeCode(current => {
-          const validCodes = splitKnowledgeCodes(current).filter(code =>
-            list.some(item => item.code === code)
-          )
-          return validCodes.length ? validCodes.join(',') : list[0]?.code || ''
+          if (current) {
+            const validCodes = splitKnowledgeCodes(current).filter(code =>
+              list.some(item => item.code === code)
+            )
+            if (validCodes.length) return validCodes.join(',')
+          }
+          const defaults = list.filter(item => item.isDefault)
+          if (defaults.length) return defaults.map(d => d.code).join(',')
+          return list[0]?.code || ''
         })
       })
       .catch(fetchError => {
@@ -299,6 +452,16 @@ export function PolicyDocumentChat() {
         }
       })
       .finally(() => setLoadingMeta(false))
+
+    fetchJson<ApiEnvelope<{ welcomeMessage?: string; welcomeSubtext?: string }>>(
+      '/api/chatdb/user/bootstrap',
+      controller.signal
+    )
+      .then(payload => {
+        const d = payload?.data || payload as unknown as { welcomeMessage?: string; welcomeSubtext?: string }
+        if (d?.welcomeMessage) setWelcomeMessage(d.welcomeMessage)
+      })
+      .catch(() => {})
 
     return () => controller.abort()
   }, [])
@@ -316,6 +479,16 @@ export function PolicyDocumentChat() {
     )
       .then(payload => setQuestions(pickList<PopularQuestion>(payload).slice(0, 3)))
       .catch(() => setQuestions([]))
+
+    fetchJson<ApiEnvelope<{ list: { id: number; question: string; topic: string }[] }>>(
+      `/api/chatdb/example-questions`,
+      controller.signal
+    )
+      .then(payload => {
+        const list = pickList<{ id: number; question: string; topic: string }>(payload)
+        setExampleQuestions(list.map(q => q.question).slice(0, 6))
+      })
+      .catch(() => setExampleQuestions([]))
 
     return () => controller.abort()
   }, [knowledgeCode])
@@ -394,8 +567,9 @@ export function PolicyDocumentChat() {
       window.localStorage.removeItem(storageKey)
     }
     if (activeSessionId) {
-      fetch(`/api/question-chat/session/${encodeURIComponent(activeSessionId)}/reset`, {
-        method: 'POST'
+      fetch(`/api/chatdb/qa/sessions/${encodeURIComponent(activeSessionId)}/reset`, {
+        method: 'POST',
+        credentials: 'include'
       }).catch(() => undefined)
     }
   }
@@ -422,8 +596,9 @@ export function PolicyDocumentChat() {
     ])
 
     try {
-      const response = await fetch('/api/question-chat', {
+      const response = await fetch('/api/chatdb/qa-chats', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           knowledgeCode,
@@ -441,57 +616,92 @@ export function PolicyDocumentChat() {
         throw new Error(await response.text().catch(() => '问答请求失败'))
       }
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith('data:')) continue
-          const raw = trimmed.slice(5).trim()
-          if (!raw || raw === '[DONE]') continue
-
-          let frame: StreamFrame
-          try {
-            frame = JSON.parse(raw) as StreamFrame
-          } catch {
-            frame = { event: 'message', content: raw }
-          }
-
-          const nextSessionId = sessionIdFromFrame(frame)
-          if (nextSessionId) {
-            setSessionId(nextSessionId)
-          }
-
-          setMessages(prev => {
-            const next = [...prev]
-            const last = next[next.length - 1]
-            if (last?.role !== 'assistant') return prev
-            const nextFrames = [...(last.frames || []), frame]
-            const citation = citationFromFrame(frame)
-            next[next.length - 1] = {
-              ...last,
-              frames: nextFrames,
-              citations: citation
-                ? [...(last.citations || []), citation]
-                : last.citations,
-              content:
-                frame.event === 'message' && frame.content
-                  ? last.content + frame.content
-                  : last.content
-            }
-            return next
-          })
+      await readSSEStream(response.body, frame => {
+        const nextSessionId = sessionIdFromFrame(frame)
+        if (nextSessionId) {
+          setSessionId(nextSessionId)
         }
-      }
+
+        setMessages(prev => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last?.role !== 'assistant') return prev
+          const nextFrames = [...(last.frames || []), frame]
+          const citation = citationFromFrame(frame)
+          const nextCitations = citation
+            ? [...(last.citations || []), citation]
+            : last.citations
+          const sections = [...(last.sections || [])]
+          let currentSectionKind = last.currentSectionKind
+          let content = last.content
+
+          if (frame.event === 'section_start') {
+            const data = asRecord(frame.data)
+            const kind = asText(data?.sectionKind) || asText(data?.kind) || ''
+            if (sectionKindFromEvent[kind]) {
+              currentSectionKind = sectionKindFromEvent[kind]
+              const existing = sections.findIndex(s => s.kind === currentSectionKind)
+              if (existing >= 0) {
+                sections[existing] = { ...sections[existing], content: '' }
+              } else {
+                sections.push({
+                  kind: currentSectionKind,
+                  title: sectionTitleFromKind[currentSectionKind],
+                  content: ''
+                })
+              }
+            }
+          } else if (currentSectionKind && frame.event === 'message' && frame.content) {
+            const idx = sections.findIndex(s => s.kind === currentSectionKind)
+            if (idx >= 0) {
+              sections[idx] = {
+                ...sections[idx],
+                content: sections[idx].content + frame.content
+              }
+            } else {
+              content = content + frame.content
+            }
+          } else if (frame.event === 'message' && frame.content) {
+            content = content + frame.content
+          } else if (sectionKindFromEvent[frame.event || ''] && frame.content) {
+            const kind = sectionKindFromEvent[frame.event!]
+            currentSectionKind = kind
+            const existing = sections.findIndex(s => s.kind === kind)
+            if (existing >= 0) {
+              sections[existing] = {
+                ...sections[existing],
+                content: sections[existing].content + frame.content
+              }
+            } else {
+              sections.push({
+                kind,
+                title: sectionTitleFromKind[kind],
+                content: frame.content
+              })
+            }
+          }
+
+          let clarification = last.clarification
+          if (frame.event === 'clarification') {
+            const d = asRecord(frame.data)
+            clarification = {
+              question: asText(d?.question) || '',
+              options: (Array.isArray(d?.options) ? d.options : []).map(String)
+            }
+          }
+
+          next[next.length - 1] = {
+            ...last,
+            frames: nextFrames,
+            citations: nextCitations,
+            content,
+            sections,
+            currentSectionKind,
+            clarification
+          }
+          return next
+        })
+      })
     } catch (submitError) {
       if ((submitError as Error).name !== 'AbortError') {
         const message = submitError instanceof Error ? submitError.message : '问答请求失败'
@@ -548,36 +758,49 @@ export function PolicyDocumentChat() {
                 <section>
                   <div className="text-center">
                     <h2 className="text-[28px] font-extrabold tracking-normal text-[#111827]">
-                      你好，我可以帮你查询文档内容
+                      {welcomeMessage || '你好，我可以帮你查询文档内容'}
                     </h2>
                     <p className="mt-3 text-[16px] leading-7 text-[#8b8f99]">
-                      支持基于已授权文档库进行问答、追问和引用定位
+                      今天想了解什么？可以问我知识库相关的问题
                     </p>
                   </div>
-                  <div className="mt-10 text-[20px] text-[#848b96]">常用问题</div>
-                  <div className="mt-5 space-y-3">
-                    {questions.length ? (
-                      questions.map(item => (
-                        <button
-                          key={`${item.question}-${item.hitCount}-${item.source || 'stat'}`}
-                          type="button"
-                          onClick={() => submit(item.question)}
-                          className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
-                        >
-                          {item.question}
-                        </button>
-                      ))
-                    ) : (
-                      <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-[15px] text-[#9ca3af]">
-                        暂无历史热门问题。
+                  {questions.length || exampleQuestions.length ? (
+                    <div className="mt-10">
+                      <div className="text-[20px] text-[#848b96]">
+                        {questions.length ? '常用问题' : '试试这样问'}
                       </div>
-                    )}
-                  </div>
+                      <div className="mt-5 space-y-3">
+                        {questions.length ? questions.map(item => (
+                          <button
+                            key={`${item.question}-${item.hitCount}-${item.source || 'stat'}`}
+                            type="button"
+                            onClick={() => submit(item.question)}
+                            className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
+                          >
+                            {item.question}
+                          </button>
+                        )) : exampleQuestions.map(q => (
+                          <button
+                            key={q}
+                            type="button"
+                            onClick={() => submit(q)}
+                            className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-10 rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-[15px] text-[#9ca3af]">
+                      暂无历史热门问题。
+                    </div>
+                  )}
                 </section>
               ) : null}
 
               {messages.map((message, index) => (
-                <ConversationMessage key={index} message={message} />
+                <ConversationMessage key={index} message={message} onViewDocument={(docId, segId) => setViewerDoc({ documentId: docId, focusSegmentId: segId })} onClarify={option => submit(option)} />
               ))}
               <div ref={bottomRef} />
             </div>
@@ -669,25 +892,64 @@ export function PolicyDocumentChat() {
                 ) : null}
               </button>
 
-              <div className="max-h-[42vh] space-y-3 overflow-y-auto">
-                {knowledgeBases.map(item => {
-                  const selected = selectedKnowledgeSet.has(item.code)
-                  return (
-                    <button
-                      key={item.code}
-                      type="button"
-                      onClick={() => toggleKnowledgeCode(item.code)}
-                      className={
-                        selected
-                          ? 'flex h-12 w-full items-center justify-between rounded-xl bg-[#333] px-4 text-left text-white'
-                          : 'flex h-12 w-full items-center justify-between rounded-xl border border-[#e5e7eb] bg-white px-4 text-left text-[#374151]'
-                      }
-                    >
-                      <span className="min-w-0 flex-1 truncate font-semibold">{item.name}</span>
-                      {selected ? <Check className="ml-3 h-4 w-4 shrink-0" /> : null}
-                    </button>
-                  )
-                })}
+              <div className="max-h-[42vh] space-y-4 overflow-y-auto">
+                {(() => {
+                  const docTypeLabels: Record<string, string> = {
+                    policy: '政策制度',
+                    manual: '业务手册',
+                    form: '表单模板',
+                    rule: '规则标准',
+                    case: '案例汇编'
+                  }
+                  const groups: Record<string, KnowledgeBase[]> = {}
+                  const ungrouped: KnowledgeBase[] = []
+                  for (const item of knowledgeBases) {
+                    const key = item.docType || ''
+                    if (key && docTypeLabels[key]) {
+                      ;(groups[key] ??= []).push(item)
+                    } else {
+                      ungrouped.push(item)
+                    }
+                  }
+                  const order = ['policy', 'manual', 'form', 'rule', 'case']
+                  const sections: { label: string; items: KnowledgeBase[] }[] = []
+                  for (const key of order) {
+                    if (groups[key]) sections.push({ label: docTypeLabels[key], items: groups[key] })
+                  }
+                  if (ungrouped.length) sections.push({ label: '其他', items: ungrouped })
+                  return sections.map(section => (
+                    <div key={section.label}>
+                      <div className="mb-2 text-[13px] font-semibold text-[#9ca3af]">{section.label}</div>
+                      <div className="space-y-2">
+                        {section.items.map(item => {
+                          const selected = selectedKnowledgeSet.has(item.code)
+                          const isEmpty = item.documentCount === 0
+                          return (
+                            <button
+                              key={item.code}
+                              type="button"
+                              onClick={() => toggleKnowledgeCode(item.code)}
+                              className={
+                                selected
+                                  ? 'flex w-full items-center justify-between rounded-xl bg-[#333] px-4 py-3 text-left text-white'
+                                  : isEmpty
+                                    ? 'flex w-full items-center justify-between rounded-xl border border-dashed border-[#e5e7eb] bg-[#fafafa] px-4 py-3 text-left text-[#9ca3af]'
+                                    : 'flex w-full items-center justify-between rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-left text-[#374151]'
+                              }
+                            >
+                              <span className="min-w-0 flex-1 truncate font-semibold">{item.name}</span>
+                              {isEmpty && item.emptyReason ? (
+                                <span className="ml-2 shrink-0 text-[11px] text-[#9ca3af]">{item.emptyReason}</span>
+                              ) : selected ? (
+                                <Check className="ml-3 h-4 w-4 shrink-0" />
+                              ) : null}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))
+                })()}
               </div>
 
               <button
@@ -701,6 +963,14 @@ export function PolicyDocumentChat() {
           </div>
         ) : null}
       </div>
+
+      {viewerDoc ? (
+        <DocumentViewer
+          documentId={viewerDoc.documentId}
+          focusSegmentId={viewerDoc.focusSegmentId}
+          onClose={() => setViewerDoc(null)}
+        />
+      ) : null}
     </div>
   )
 }

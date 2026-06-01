@@ -6,7 +6,9 @@ import Link from 'next/link'
 import { LogOut, UserRound } from 'lucide-react'
 
 type Topic = {
+  code?: string
   label: string
+  name?: string
   value: string
   permission?: number
   enabled?: boolean
@@ -17,7 +19,30 @@ type AlertItem = {
   topic: string
   content: string
   question?: string
+  title?: string
   displayTimeText?: string
+}
+
+type BootstrapData = {
+  welcomeMessage?: string
+  welcomeSubtext?: string
+  authenticated?: boolean
+}
+
+type ExampleQuestion = {
+  id: number
+  topic: string
+  question: string
+}
+
+const visibleTopicOrder = ['grid', 'population', 'traffic']
+
+function topicCode(topic: Topic) {
+  return topic.code || topic.value
+}
+
+function topicLabel(topic: Topic) {
+  return topic.name || topic.label
 }
 
 export function QuestionPlatformHome() {
@@ -27,7 +52,10 @@ export function QuestionPlatformHome() {
   const [loadingAlerts, setLoadingAlerts] = useState(true)
   const [userName, setUserName] = useState('用户')
   const [profileOpen, setProfileOpen] = useState(false)
+  const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null)
+  const [exampleQuestions, setExampleQuestions] = useState<ExampleQuestion[]>([])
   const profileRef = useRef<HTMLDivElement>(null)
+  const topicQuery = topics.map(topic => topicCode(topic)).join(',')
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -36,6 +64,29 @@ export function QuestionPlatformHome() {
         setUserName(storedName)
       }
     })
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/chatdb/user/bootstrap', { cache: 'no-store', credentials: 'include' })
+      .then(r => r.json())
+      .then(json => {
+        if (active && json?.data) setBootstrap(json.data)
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/chatdb/example-questions', { cache: 'no-store', credentials: 'include' })
+      .then(r => r.json())
+      .then(json => {
+        const list = json?.data?.list || json?.list || []
+        if (active && Array.isArray(list)) setExampleQuestions(list.slice(0, 6))
+      })
+      .catch(() => {})
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
@@ -54,12 +105,28 @@ export function QuestionPlatformHome() {
 
     async function loadTopics() {
       try {
-        const response = await fetch('/api/chatdb/topics', { cache: 'no-store' })
+        const response = await fetch('/api/chatdb/topics', {
+          cache: 'no-store',
+          credentials: 'include'
+        })
         if (!response.ok) throw new Error('load topics failed')
         const payload = await response.json()
         const list = payload?.data?.list || payload?.list || []
         if (active && Array.isArray(list)) {
-          setTopics(list.filter((topic: Topic) => topic.enabled !== false))
+          setTopics(
+            list
+              .filter((topic: Topic) => {
+                const code = topicCode(topic)
+                return (
+                  topic.enabled !== false && visibleTopicOrder.includes(code)
+                )
+              })
+              .sort(
+                (a: Topic, b: Topic) =>
+                  visibleTopicOrder.indexOf(topicCode(a)) -
+                  visibleTopicOrder.indexOf(topicCode(b))
+              )
+          )
         }
       } catch {
         if (active) setTopics([])
@@ -80,8 +147,18 @@ export function QuestionPlatformHome() {
     let active = true
 
     async function loadAlerts() {
+      if (!topicQuery) {
+        if (active) {
+          setAlerts([])
+          setLoadingAlerts(false)
+        }
+        return
+      }
       try {
-        const response = await fetch('/api/chatdb/alerts', { cache: 'no-store' })
+        const response = await fetch(
+          `/api/chatdb/alerts?topics=${encodeURIComponent(topicQuery)}`,
+          { cache: 'no-store', credentials: 'include' }
+        )
         if (!response.ok) throw new Error('load alerts failed')
         const payload = await response.json()
         const list = payload?.data?.list || payload?.list || []
@@ -101,17 +178,18 @@ export function QuestionPlatformHome() {
       active = false
       window.clearInterval(timer)
     }
-  }, [])
+  }, [topicQuery])
 
   const dismissAlert = async (alertId: number) => {
     setAlerts(items => items.filter(item => item.id !== alertId))
     await fetch(`/api/chatdb/alerts/${alertId}/dismiss`, {
-      method: 'POST'
+      method: 'POST',
+      credentials: 'include'
     }).catch(() => undefined)
   }
 
   const logout = async () => {
-    await fetch('/api/chatdb/logout', { method: 'POST' }).catch(() => undefined)
+    await fetch('/api/chatdb/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined)
     window.localStorage.removeItem('chatdb_user_login')
     window.localStorage.removeItem('chatdb_user_name')
     window.location.reload()
@@ -162,9 +240,11 @@ export function QuestionPlatformHome() {
         <main className="px-8 pt-12">
           <section>
             <h2 className="text-[38px] font-extrabold leading-tight tracking-normal">
-              您好，今天想了解什么？
+              {bootstrap?.welcomeMessage || `您好，${userName}`}
             </h2>
-            <p className="mt-5 text-[20px] text-[#8b8f99]">请选择业务主题</p>
+            <p className="mt-5 text-[20px] text-[#8b8f99]">
+              {bootstrap?.welcomeSubtext || '请选择业务主题'}
+            </p>
 
             <div
               className="mt-12 grid gap-3"
@@ -175,10 +255,10 @@ export function QuestionPlatformHome() {
               {topics.map(topic => (
                 <Link
                   key={topic.value}
-                  href={`/ask?topic=${topic.value}`}
+                  href={`/ask?topic=${topicCode(topic)}`}
                   className="flex h-[74px] items-center justify-center rounded-[13px] border border-[#e8e8e8] bg-white text-[22px] font-semibold shadow-[0_1px_8px_rgba(0,0,0,0.02)] transition hover:border-[#b8b8b8] hover:bg-[#fafafa]"
                 >
-                  {topic.label}
+                  {topicLabel(topic)}
                 </Link>
               ))}
             </div>
@@ -189,24 +269,47 @@ export function QuestionPlatformHome() {
               </div>
             ) : null}
 
+            {/* 智能问答入口暂时隐藏
             <Link
               href="/qa"
               className="mt-5 flex h-[78px] items-center justify-center rounded-[13px] bg-[#484848] text-[24px] font-bold text-white transition hover:bg-[#333333]"
             >
               智能问答
             </Link>
+            */}
+
+            {exampleQuestions.length > 0 ? (
+              <div className="mt-8">
+                <h3 className="text-[16px] font-medium text-[#9aa0aa]">试试这样问</h3>
+                <div className="mt-3 space-y-2">
+                  {exampleQuestions.map(eq => {
+                    const topic = topics.find(t => topicCode(t) === eq.topic)
+                    const href = eq.topic === 'qa'
+                      ? `/ask?topic=grid&q=${encodeURIComponent(eq.question)}`
+                      : `/ask?topic=${eq.topic || ''}&q=${encodeURIComponent(eq.question)}`
+                    return (
+                      <Link
+                        key={eq.id}
+                        href={href}
+                        className="block rounded-xl border border-[#eeeeee] bg-[#fafafa] px-4 py-3 text-[15px] text-[#374151] transition hover:border-[#cbd5e1] hover:bg-white"
+                      >
+                        {eq.question}
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="mt-16">
-            <h3 className="text-[20px] font-normal text-[#9aa0aa]">
-              实时告警
-            </h3>
+            <h3 className="text-[20px] font-normal text-[#9aa0aa]">实时告警</h3>
 
             <div className="mt-5 space-y-4">
               {alerts.map(alert => (
                 <Link
                   key={alert.id}
-                  href={`/ask?topic=${alert.topic}&q=${encodeURIComponent(alert.question || alert.content)}`}
+                  href={`/ask?topic=${alert.topic}&alertId=${alert.id}&autoAsk=1&q=${encodeURIComponent(alert.question || alert.content)}`}
                   className="group flex min-h-[98px] items-center rounded-[13px] border border-[#ffcfc5] bg-[#fff8f6] px-7 text-left"
                 >
                   <span className="mr-4 h-[55px] w-1 rounded-full bg-[#ff784f]" />
@@ -215,7 +318,7 @@ export function QuestionPlatformHome() {
                       {alert.displayTimeText || '刚刚'}
                     </span>
                     <span className="mt-2 block truncate text-[18px] text-[#333]">
-                      {alert.content}
+                      {alert.title || alert.content}
                     </span>
                   </span>
                   <button
@@ -237,7 +340,7 @@ export function QuestionPlatformHome() {
 
               {!loadingAlerts && alerts.length === 0 ? (
                 <div className="rounded-[13px] border border-[#eeeeee] bg-[#fafafa] px-5 py-6 text-[16px] text-[#8b8f99]">
-                  暂无实时告警
+                  暂无异常
                 </div>
               ) : null}
             </div>

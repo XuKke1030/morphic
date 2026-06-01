@@ -10,10 +10,16 @@ export async function POST() {
     path: '/',
     maxAge: 0
   })
+  response.cookies.set('chatdb_token', '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/api/chatdb/admin/sync',
+    maxAge: 0
+  })
   response.cookies.set('chatdb_admin_token', '', {
     httpOnly: true,
     sameSite: 'lax',
-    path: '/admin',
+    path: '/',
     maxAge: 0
   })
   return response
