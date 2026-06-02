@@ -1,17 +1,12 @@
 'use client'
 
-import { FormEvent, ReactNode, useEffect, useState } from 'react'
+import { FormEvent, ReactNode, useState } from 'react'
 
 import { LockKeyhole, ShieldCheck } from 'lucide-react'
 
-type LoginMode = 'user' | 'admin'
+import { useChatDbAuth } from '@/lib/contexts/chatdb-auth-context'
 
-function safeSetItem(key: string, value: string) {
-  try { window.localStorage.setItem(key, value) } catch { /* storage full or private browsing */ }
-}
-function safeGetItem(key: string): string | null {
-  try { return window.localStorage.getItem(key) } catch { return null }
-}
+type LoginMode = 'user' | 'admin'
 
 type Props = {
   mode: LoginMode
@@ -22,115 +17,53 @@ const modeConfig = {
   user: {
     title: '问答问数平台',
     subtitle: '请登录后使用网格、人流、车流与智能问答',
-    storageKey: 'chatdb_user_login',
-    usernameKey: 'chatdb_user_name',
-    api: '/api/chatdb/login',
     button: '登录平台'
   },
   admin: {
     title: '问数管理后台',
     subtitle: '管理员登录后可维护权限、问题与数据接入',
-    storageKey: 'chatdb_admin_login',
-    usernameKey: 'chatdb_admin_name',
-    api: '/api/chatdb/admin/login',
     button: '进入后台'
   }
 } satisfies Record<LoginMode, Record<string, string>>
 
 export function ChatDbLoginGate({ mode, children }: Props) {
   const config = modeConfig[mode]
-  const [ready, setReady] = useState(false)
-  const [loggedIn, setLoggedIn] = useState(false)
+  const {
+    initialLoading,
+    userAuthenticated,
+    adminAuthenticated,
+    login,
+    error: contextError
+  } = useChatDbAuth()
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [localError, setLocalError] = useState('')
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      const hasLocalLogin = safeGetItem(config.storageKey) === '1'
-      const storedName = safeGetItem(config.usernameKey)
-      if (storedName) {
-        setUsername(storedName)
-      }
-      if (!hasLocalLogin) {
-        setLoggedIn(false)
-        setReady(true)
-        return
-      }
-      const verifyUrl = mode === 'admin'
-        ? '/api/chatdb/admin/profile'
-        : '/api/chatdb/permissions'
-      fetch(verifyUrl, { cache: 'no-store', credentials: 'include' })
-        .then(response => {
-          if (!response.ok) throw new Error('unauthorized')
-          return response.json()
-        })
-        .then(payload => {
-          const data = payload?.data || payload
-          if (mode === 'admin') {
-            const valid = data?.username && data.username !== ''
-            if (valid) {
-              setLoggedIn(true)
-              safeSetItem(config.usernameKey, data.username)
-              setUsername(data.username)
-            } else {
-              throw new Error('invalid profile')
-            }
-          } else {
-            if (data?.authenticated) {
-              setLoggedIn(true)
-              if (data.username) {
-                safeSetItem(config.usernameKey, data.username)
-                setUsername(data.username)
-              }
-            } else {
-              throw new Error('not authenticated')
-            }
-          }
-        })
-        .catch(() => {
-          window.localStorage.removeItem(config.storageKey)
-          window.localStorage.removeItem(config.usernameKey)
-          setLoggedIn(false)
-        })
-        .finally(() => setReady(true))
-    })
-  }, [config.storageKey, config.usernameKey, mode])
+  const authenticated =
+    mode === 'admin' ? adminAuthenticated : userAuthenticated
+  const error = localError || contextError
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError('')
-    setSubmitting(true)
-    try {
-      const response = await fetch(config.api, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      })
-      const payload = await response.json().catch(() => null)
-      if (!response.ok || payload?.code !== 0) {
-        throw new Error(payload?.message || '登录失败，请检查账号和密码')
-      }
-      safeSetItem(config.storageKey, '1')
-      safeSetItem(
-        config.usernameKey,
-        payload?.data?.username || username
-      )
-      setLoggedIn(true)
-    } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : '登录失败')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  if (!ready) {
+  if (initialLoading) {
     return null
   }
 
-  if (loggedIn) {
+  if (authenticated) {
     return <>{children}</>
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setLocalError('')
+    setSubmitting(true)
+    try {
+      await login(mode, username, password)
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : '登录失败')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (

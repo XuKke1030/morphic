@@ -21,7 +21,17 @@ import {
   X
 } from 'lucide-react'
 
-type AdminSection = 'overview' | 'users' | 'questions' | 'candidates' | 'data' | 'documents' | 'metrics' | 'logs'
+import { useChatDbAuth } from '@/lib/contexts/chatdb-auth-context'
+
+type AdminSection =
+  | 'overview'
+  | 'users'
+  | 'questions'
+  | 'candidates'
+  | 'data'
+  | 'documents'
+  | 'metrics'
+  | 'logs'
 type TopicKey = 'grid' | 'population' | 'traffic'
 
 type TopicPermission = {
@@ -201,9 +211,22 @@ const menuGroups: Array<{
 }> = [
   { title: '概览', items: [{ key: 'overview', label: '首页' }] },
   { title: '权限管理', items: [{ key: 'users', label: '用户权限管理' }] },
-  { title: '内容管理', items: [{ key: 'questions' as AdminSection, label: '示例问题管理' }, { key: 'candidates' as AdminSection, label: '问题沉淀管理' }, { key: 'documents' as AdminSection, label: '文档关联管理' }] },
+  {
+    title: '内容管理',
+    items: [
+      { key: 'questions' as AdminSection, label: '示例问题管理' },
+      { key: 'candidates' as AdminSection, label: '问题沉淀管理' },
+      { key: 'documents' as AdminSection, label: '文档关联管理' }
+    ]
+  },
   { title: '数据接入', items: [{ key: 'data', label: '数据接入管理' }] },
-  { title: '系统', items: [{ key: 'metrics' as AdminSection, label: '指标目录管理' }, { key: 'logs', label: '操作日志' }] }
+  {
+    title: '系统',
+    items: [
+      { key: 'metrics' as AdminSection, label: '指标目录管理' },
+      { key: 'logs', label: '操作日志' }
+    ]
+  }
 ]
 
 const sectionTitles: Record<AdminSection, string> = {
@@ -221,9 +244,11 @@ const sectionSubtitles: Partial<Record<AdminSection, string>> = {
   users: '用户来自统一认证系统，在此配置各用户的数据访问白名单。',
   questions:
     '配置用户不标准提问到标准问题的映射，以及期望的回答内容（后两项选填）。',
-  candidates: '审批用户高频问题沉淀为示例问题，被拒绝的候选不会进入示例问题库。',
+  candidates:
+    '审批用户高频问题沉淀为示例问题，被拒绝的候选不会进入示例问题库。',
   documents: '管理文档间的引用、补充、废止、相关关系，支持自动发现和合规检查。',
-  metrics: '配置车流/人流/网格各类指标的显示名称、阈值、单位和维度，影响快问路由和告警规则。',
+  metrics:
+    '配置车流/人流/网格各类指标的显示名称、阈值、单位和维度，影响快问路由和告警规则。',
   logs: '记录问答问数系统的用户查询日志，以及管理后台的操作记录。'
 }
 
@@ -446,8 +471,18 @@ function MetricCard({
   )
 }
 
-function SourceStatusCard({ source, lastSyncFailed }: { source: DataSource; lastSyncFailed?: boolean }) {
-  const displayStatus = !source.enabled ? '已关闭' : lastSyncFailed ? '同步异常' : '接入正常'
+function SourceStatusCard({
+  source,
+  lastSyncFailed
+}: {
+  source: DataSource
+  lastSyncFailed?: boolean
+}) {
+  const displayStatus = !source.enabled
+    ? '已关闭'
+    : lastSyncFailed
+      ? '同步异常'
+      : '接入正常'
   const statusColor = !source.enabled
     ? 'text-[#8a9099]'
     : lastSyncFailed
@@ -458,9 +493,7 @@ function SourceStatusCard({ source, lastSyncFailed }: { source: DataSource; last
       <div className="text-xl font-bold text-[#05070a]">
         {sourceLabels[source.type] || source.name}
       </div>
-      <div className={`text-xl font-bold ${statusColor}`}>
-        {displayStatus}
-      </div>
+      <div className={`text-xl font-bold ${statusColor}`}>{displayStatus}</div>
     </div>
   )
 }
@@ -490,10 +523,14 @@ export function AdminDashboard() {
   const [importAudits, setImportAudits] = useState<GridImportAudit[]>([])
   const [activeAuditId, setActiveAuditId] = useState<number | null>(null)
   const [activeSyncTaskId, setActiveSyncTaskId] = useState<number | null>(null)
-  const [topicBindings, setTopicBindings] = useState<TopicKnowledgeBinding[]>([])
+  const [topicBindings, setTopicBindings] = useState<TopicKnowledgeBinding[]>(
+    []
+  )
   const [docRelations, setDocRelations] = useState<DocumentRelationItem[]>([])
   const [metrics, setMetrics] = useState<MetricItem[]>([])
-  const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>([])
+  const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>(
+    []
+  )
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -518,7 +555,9 @@ export function AdminDashboard() {
         adminFetch<{ list: GridImport[] }>('grid-data/imports'),
         adminFetch<{ list: QuestionCandidate[] }>('question-candidates'),
         qaSyncFetch<{ list: SyncTask[] }>('status?limit=8'),
-        adminFetch<{ list: TopicKnowledgeBinding[] }>('topic-knowledge-bindings'),
+        adminFetch<{ list: TopicKnowledgeBinding[] }>(
+          'topic-knowledge-bindings'
+        ),
         adminFetch<{ list: DocumentRelationItem[] }>('document-relations'),
         adminFetch<{ list: MetricItem[] }>('metrics')
       ])
@@ -805,7 +844,12 @@ export function AdminDashboard() {
   }
 
   async function rollbackImport(importId: number) {
-    if (!confirm('确认回滚该批次？将删除该批次导入的所有案件记录，此操作不可撤销。')) return
+    if (
+      !confirm(
+        '确认回滚该批次？将删除该批次导入的所有案件记录，此操作不可撤销。'
+      )
+    )
+      return
     setSavingId(`rollback-${importId}`)
     try {
       const data = await adminFetch<{ item: GridImport }>(
@@ -831,11 +875,17 @@ export function AdminDashboard() {
         body: JSON.stringify({ enabled })
       })
       setTopicBindings(prev =>
-        prev.map(b => (b.id === id ? { ...b, enabled, updateTime: Math.floor(Date.now() / 1000) } : b))
+        prev.map(b =>
+          b.id === id
+            ? { ...b, enabled, updateTime: Math.floor(Date.now() / 1000) }
+            : b
+        )
       )
       setError('')
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '切换绑定状态失败')
+      setError(
+        saveError instanceof Error ? saveError.message : '切换绑定状态失败'
+      )
     } finally {
       setSavingId(null)
     }
@@ -858,14 +908,19 @@ export function AdminDashboard() {
   async function bindTopicKnowledge(topic: string, knowledgeCode: string) {
     setSavingId(`binding-new`)
     try {
-      const data = await adminFetch<{ item: TopicKnowledgeBinding }>('topic-knowledge-bindings', {
-        method: 'POST',
-        body: JSON.stringify({ topic, knowledgeCode })
-      })
+      const data = await adminFetch<{ item: TopicKnowledgeBinding }>(
+        'topic-knowledge-bindings',
+        {
+          method: 'POST',
+          body: JSON.stringify({ topic, knowledgeCode })
+        }
+      )
       setTopicBindings(prev => [...prev, data.item])
       setError('')
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '绑定知识库失败')
+      setError(
+        saveError instanceof Error ? saveError.message : '绑定知识库失败'
+      )
     } finally {
       setSavingId(null)
     }
@@ -940,10 +995,10 @@ export function AdminDashboard() {
     }
   }
 
+  const { logout: authLogout, adminUsername } = useChatDbAuth()
+
   async function logout() {
-    await fetch('/api/chatdb/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined)
-    window.localStorage.removeItem('chatdb_admin_login')
-    window.location.reload()
+    await authLogout('admin')
   }
 
   function openQuestionModal() {
@@ -994,7 +1049,9 @@ export function AdminDashboard() {
               管
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-xl font-bold leading-tight">admin</div>
+              <div className="text-xl font-bold leading-tight">
+                {adminUsername || 'admin'}
+              </div>
               <div className="mt-1 text-base text-[#a1a7b1]">超级管理员</div>
             </div>
             <button
@@ -1125,11 +1182,15 @@ export function AdminDashboard() {
             <CandidatesPanel
               candidates={candidates}
               onApprove={async (id: number) => {
-                await adminFetch(`question-candidates/${id}/approve`, { method: 'PUT' })
+                await adminFetch(`question-candidates/${id}/approve`, {
+                  method: 'PUT'
+                })
                 loadAdminData()
               }}
               onReject={async (id: number) => {
-                await adminFetch(`question-candidates/${id}/reject`, { method: 'PUT' })
+                await adminFetch(`question-candidates/${id}/reject`, {
+                  method: 'PUT'
+                })
                 loadAdminData()
               }}
             />
@@ -1139,11 +1200,25 @@ export function AdminDashboard() {
             <MetricsPanel
               metrics={metrics}
               onReload={loadAdminData}
-              onCreate={async (topic: string, metricName: string, displayName: string, unit: string, defaultThreshold: number | null, thresholdDirection: string) => {
+              onCreate={async (
+                topic: string,
+                metricName: string,
+                displayName: string,
+                unit: string,
+                defaultThreshold: number | null,
+                thresholdDirection: string
+              ) => {
                 await adminFetch('metrics', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ topic, metricName, displayName, unit, defaultThreshold, thresholdDirection })
+                  body: JSON.stringify({
+                    topic,
+                    metricName,
+                    displayName,
+                    unit,
+                    defaultThreshold,
+                    thresholdDirection
+                  })
                 })
                 loadAdminData()
               }}
@@ -1172,34 +1247,58 @@ export function AdminDashboard() {
               complianceIssues={complianceIssues}
               onReload={loadAdminData}
               onAutoDiscover={async (knowledgeCode, dryRun) => {
-                const result = await adminFetch<{ discovered?: DocumentRelationItem[]; created?: number }>('document-relations/auto', {
+                const result = await adminFetch<{
+                  discovered?: DocumentRelationItem[]
+                  created?: number
+                }>('document-relations/auto', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ knowledgeCode, dryRun })
                 })
                 if (dryRun && result?.discovered) {
-                  setDocRelations(prev => [...prev, ...result.discovered!.map((d: DocumentRelationItem) => ({ ...d, id: -Date.now() }))])
+                  setDocRelations(prev => [
+                    ...prev,
+                    ...result.discovered!.map((d: DocumentRelationItem) => ({
+                      ...d,
+                      id: -Date.now()
+                    }))
+                  ])
                 } else {
                   loadAdminData()
                 }
               }}
-              onComplianceCheck={async (knowledgeCode) => {
-                const result = await adminFetch<{ issues?: ComplianceIssue[] }>('documents/compliance', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ knowledgeCode })
-                })
+              onComplianceCheck={async knowledgeCode => {
+                const result = await adminFetch<{ issues?: ComplianceIssue[] }>(
+                  'documents/compliance',
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ knowledgeCode })
+                  }
+                )
                 setComplianceIssues(result?.issues || [])
               }}
               onDeleteRelation={async (id: number) => {
-                await adminFetch(`document-relations/${id}`, { method: 'DELETE' })
+                await adminFetch(`document-relations/${id}`, {
+                  method: 'DELETE'
+                })
                 loadAdminData()
               }}
-              onCreateRelation={async (fromDocId: number, toDocId: number, relType: string, description: string) => {
+              onCreateRelation={async (
+                fromDocId: number,
+                toDocId: number,
+                relType: string,
+                description: string
+              ) => {
                 await adminFetch('document-relations', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ fromDocId, toDocId, relType, description })
+                  body: JSON.stringify({
+                    fromDocId,
+                    toDocId,
+                    relType,
+                    description
+                  })
                 })
                 loadAdminData()
               }}
@@ -1260,13 +1359,15 @@ function OverviewPanel({
   syncTasks: SyncTask[]
 }) {
   const failedSyncTypes = new Set(
-    syncTasks.filter(t => t.status === 'failed' || t.status === 'partial_failed').map(t => {
-      const st = t.syncType
-      if (st.startsWith('traffic')) return 'traffic'
-      if (st.startsWith('population')) return 'population'
-      if (st.startsWith('grid')) return 'grid'
-      return st
-    })
+    syncTasks
+      .filter(t => t.status === 'failed' || t.status === 'partial_failed')
+      .map(t => {
+        const st = t.syncType
+        if (st.startsWith('traffic')) return 'traffic'
+        if (st.startsWith('population')) return 'population'
+        if (st.startsWith('grid')) return 'grid'
+        return st
+      })
   )
   return (
     <div>
@@ -1275,19 +1376,27 @@ function OverviewPanel({
           <div className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
             <AlertTriangle className="h-5 w-5 text-[#ff3b30]" />
             <span>
-              {dataSources.filter(item => !item.enabled).map(item => sourceLabels[item.type] || item.name).join('、')}
-              {' '}接入中断
+              {dataSources
+                .filter(item => !item.enabled)
+                .map(item => sourceLabels[item.type] || item.name)
+                .join('、')}{' '}
+              接入中断
             </span>
             <X className="h-4 w-4 text-[#a6abb3]" />
           </div>
         ) : null}
-        {[...failedSyncTypes].filter(type => dataSources.some(s => s.type === type && s.enabled)).map(type => (
-          <div key={type} className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
-            <AlertTriangle className="h-5 w-5 text-[#ff3b30]" />
-            <span>{sourceLabels[type as TopicKey] || type}同步失败</span>
-            <X className="h-4 w-4 text-[#a6abb3]" />
-          </div>
-        ))}
+        {[...failedSyncTypes]
+          .filter(type => dataSources.some(s => s.type === type && s.enabled))
+          .map(type => (
+            <div
+              key={type}
+              className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg"
+            >
+              <AlertTriangle className="h-5 w-5 text-[#ff3b30]" />
+              <span>{sourceLabels[type as TopicKey] || type}同步失败</span>
+              <X className="h-4 w-4 text-[#a6abb3]" />
+            </div>
+          ))}
         {failedImports[0] ? (
           <div className="inline-flex h-[48px] items-center gap-3 rounded-xl border-2 border-[#ff5a3d] bg-white px-4 text-lg">
             <span className="font-bold text-[#ff3b30]">!</span>
@@ -1327,7 +1436,11 @@ function OverviewPanel({
       <h2 className="mt-7 text-2xl font-bold">数据源状态</h2>
       <div className="mt-4 grid gap-5 xl:grid-cols-3">
         {dataSources.map(source => (
-          <SourceStatusCard key={source.type} source={source} lastSyncFailed={failedSyncTypes.has(source.type)} />
+          <SourceStatusCard
+            key={source.type}
+            source={source}
+            lastSyncFailed={failedSyncTypes.has(source.type)}
+          />
         ))}
       </div>
     </div>
@@ -1650,17 +1763,19 @@ function DataPanel({
   const traffic = dataSources.find(source => source.type === 'traffic')
   const latestImport = imports[0]
   const failedSyncTypes = new Set(
-    syncTasks.filter(t => t.status === 'failed' || t.status === 'partial_failed').map(t => {
-      const st = t.syncType
-      if (st.startsWith('traffic')) return 'traffic'
-      if (st.startsWith('population')) return 'population'
-      if (st.startsWith('grid')) return 'grid'
-      return st
-    })
+    syncTasks
+      .filter(t => t.status === 'failed' || t.status === 'partial_failed')
+      .map(t => {
+        const st = t.syncType
+        if (st.startsWith('traffic')) return 'traffic'
+        if (st.startsWith('population')) return 'population'
+        if (st.startsWith('grid')) return 'grid'
+        return st
+      })
   )
   const syncPathToSourceType: Record<string, string> = {
     'knowledge-bases': '',
-    'documents': '',
+    documents: '',
     'grid-data': 'grid',
     'traffic-data': 'traffic',
     'population-data': 'population'
@@ -1708,7 +1823,9 @@ function DataPanel({
           {syncActions.map(action => {
             const running = savingId === `qa-sync-${action.path}`
             const sourceType = syncPathToSourceType[action.path]
-            const sourceDisabled = sourceType ? !dataSources.find(s => s.type === sourceType)?.enabled : false
+            const sourceDisabled = sourceType
+              ? !dataSources.find(s => s.type === sourceType)?.enabled
+              : false
             return (
               <button
                 key={action.path}
@@ -1720,7 +1837,9 @@ function DataPanel({
                 <div className="flex items-center justify-between">
                   <span className="text-xl font-bold">{action.label}</span>
                   {sourceDisabled ? (
-                    <span className="text-sm font-bold text-[#8a9099]">已关闭</span>
+                    <span className="text-sm font-bold text-[#8a9099]">
+                      已关闭
+                    </span>
                   ) : (
                     <RefreshCw
                       className={`h-5 w-5 text-[#8a9099] ${running ? 'animate-spin' : ''}`}
@@ -1728,7 +1847,9 @@ function DataPanel({
                   )}
                 </div>
                 <p className="mt-3 text-base leading-6 text-[#7b818c]">
-                  {sourceDisabled ? '数据源已关闭，请先开启后再同步' : action.description}
+                  {sourceDisabled
+                    ? '数据源已关闭，请先开启后再同步'
+                    : action.description}
                 </p>
               </button>
             )
@@ -1857,7 +1978,9 @@ function DataPanel({
       <section className="rounded-[18px] border border-[#e1e3e8] bg-white">
         <div className="border-b border-[#eceef2] px-7 py-6">
           <h2 className="text-2xl font-bold">主题知识库绑定</h2>
-          <p className="mt-2 text-lg text-[#8a9099]">配置各主题可访问的问答知识库范围。</p>
+          <p className="mt-2 text-lg text-[#8a9099]">
+            配置各主题可访问的问答知识库范围。
+          </p>
         </div>
         <div className="px-7 py-7">
           <table className="min-w-full table-fixed text-left text-xl">
@@ -1880,8 +2003,12 @@ function DataPanel({
             <tbody className="divide-y divide-[#eceef2]">
               {topicBindings.map(b => (
                 <tr key={b.id}>
-                  <td className="px-5 py-5">{sourceLabels[b.topic as TopicKey] || b.topic}</td>
-                  <td className="px-5 py-5">{b.knowledgeName || b.knowledgeCode}</td>
+                  <td className="px-5 py-5">
+                    {sourceLabels[b.topic as TopicKey] || b.topic}
+                  </td>
+                  <td className="px-5 py-5">
+                    {b.knowledgeName || b.knowledgeCode}
+                  </td>
                   <td className="px-5 py-5">
                     <AdminToggle
                       checked={b.enabled}
@@ -1889,7 +2016,9 @@ function DataPanel({
                       onChange={checked => onToggleBinding(b.id, checked)}
                     />
                   </td>
-                  <td className="px-5 py-5 text-[#8a9099]">{formatTime(b.updateTime, true)}</td>
+                  <td className="px-5 py-5 text-[#8a9099]">
+                    {formatTime(b.updateTime, true)}
+                  </td>
                   <td className="px-5 py-5">
                     <button
                       type="button"
@@ -1904,7 +2033,10 @@ function DataPanel({
               ))}
               {topicBindings.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-5 text-center text-[#8a9099]">
+                  <td
+                    colSpan={5}
+                    className="px-5 py-5 text-center text-[#8a9099]"
+                  >
                     暂无绑定，请在上方新增
                   </td>
                 </tr>
@@ -1917,7 +2049,9 @@ function DataPanel({
               className="h-[44px] rounded-lg border border-[#dfe3ea] px-4 text-lg"
               defaultValue=""
             >
-              <option value="" disabled>选择主题</option>
+              <option value="" disabled>
+                选择主题
+              </option>
               <option value="grid">网格</option>
               <option value="traffic">车流</option>
               <option value="population">人流</option>
@@ -1930,8 +2064,16 @@ function DataPanel({
             <button
               type="button"
               onClick={() => {
-                const topic = (document.getElementById('new-binding-topic') as HTMLSelectElement)?.value
-                const code = (document.getElementById('new-binding-code') as HTMLInputElement)?.value?.trim()
+                const topic = (
+                  document.getElementById(
+                    'new-binding-topic'
+                  ) as HTMLSelectElement
+                )?.value
+                const code = (
+                  document.getElementById(
+                    'new-binding-code'
+                  ) as HTMLInputElement
+                )?.value?.trim()
                 if (topic && code) onBindBinding(topic, code)
               }}
               disabled={savingId === 'binding-new'}
@@ -2019,20 +2161,31 @@ function DataPanel({
                     </div>
                   </div>
                   <div className="ml-4 flex shrink-0 items-center gap-2">
-                    {item.status === 'completed' || item.status === 'partial_success' ? (
+                    {item.status === 'completed' ||
+                    item.status === 'partial_success' ? (
                       <button
                         type="button"
                         className="text-sm text-[#d93025] hover:underline disabled:opacity-40"
                         disabled={savingId === `rollback-${item.id}`}
                         onClick={() => onRollback(item.id)}
                       >
-                        {savingId === `rollback-${item.id}` ? '回滚中...' : '回滚'}
+                        {savingId === `rollback-${item.id}`
+                          ? '回滚中...'
+                          : '回滚'}
                       </button>
                     ) : null}
-                    <button type="button" onClick={() => onToggleAudit(item.id)}>
-                      <span className="text-sm text-[#4f6ef7] hover:underline">审计</span>
+                    <button
+                      type="button"
+                      onClick={() => onToggleAudit(item.id)}
+                    >
+                      <span className="text-sm text-[#4f6ef7] hover:underline">
+                        审计
+                      </span>
                     </button>
-                    <button type="button" onClick={() => onToggleErrors(item.id)}>
+                    <button
+                      type="button"
+                      onClick={() => onToggleErrors(item.id)}
+                    >
                       <Tag danger={item.status !== 'completed'}>
                         {statusLabel(item.status)}
                       </Tag>
@@ -2041,20 +2194,37 @@ function DataPanel({
                 </div>
                 {activeAuditId === item.id ? (
                   <div className="rounded-xl bg-[#f0f4ff] p-4">
-                    <div className="mb-2 text-base font-bold text-[#4f6ef7]">操作审计</div>
+                    <div className="mb-2 text-base font-bold text-[#4f6ef7]">
+                      操作审计
+                    </div>
                     {importAudits.length === 0 ? (
                       <div className="text-lg text-[#8a9099]">暂无审计记录</div>
                     ) : (
                       importAudits.map(audit => (
-                        <div key={audit.id} className="flex items-start gap-3 border-l-2 border-[#4f6ef7] py-2 pl-3 text-base">
+                        <div
+                          key={audit.id}
+                          className="flex items-start gap-3 border-l-2 border-[#4f6ef7] py-2 pl-3 text-base"
+                        >
                           <div className="min-w-0 flex-1">
-                            <span className="font-bold">{audit.action === 'upload' ? '上传' : audit.action === 'rollback' ? '回滚' : audit.action}</span>
+                            <span className="font-bold">
+                              {audit.action === 'upload'
+                                ? '上传'
+                                : audit.action === 'rollback'
+                                  ? '回滚'
+                                  : audit.action}
+                            </span>
                             <span className="mx-2 text-[#a0a6af]">·</span>
-                            <span className="text-[#6b7280]">{audit.operator}</span>
+                            <span className="text-[#6b7280]">
+                              {audit.operator}
+                            </span>
                             <span className="mx-2 text-[#a0a6af]">·</span>
-                            <span className="text-[#a0a6af]">{formatTime(audit.createTime, true)}</span>
+                            <span className="text-[#a0a6af]">
+                              {formatTime(audit.createTime, true)}
+                            </span>
                             {audit.detail ? (
-                              <div className="mt-1 text-[#6b7280]">{audit.detail}</div>
+                              <div className="mt-1 text-[#6b7280]">
+                                {audit.detail}
+                              </div>
                             ) : null}
                           </div>
                         </div>
@@ -2104,20 +2274,29 @@ function CandidatesPanel({
     rejected: { label: '已拒绝', cls: 'bg-[#f3f4f6] text-[#6b7280]' }
   }
 
-  const filtered = statusFilter === 'all' ? candidates : candidates.filter(c => c.status === statusFilter)
+  const filtered =
+    statusFilter === 'all'
+      ? candidates
+      : candidates.filter(c => c.status === statusFilter)
   const pendingCount = candidates.filter(c => c.status === 'pending').length
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         {['all', 'pending', 'approved', 'rejected'].map(s => (
-          <button key={s} type="button"
+          <button
+            key={s}
+            type="button"
             onClick={() => setStatusFilter(s)}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              statusFilter === s ? 'bg-[#333] text-white' : 'border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-[#f9fafb]'
+              statusFilter === s
+                ? 'bg-[#333] text-white'
+                : 'border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-[#f9fafb]'
             }`}
           >
-            {s === 'all' ? `全部(${candidates.length})` : `${statusLabels[s]?.label || s}(${candidates.filter(c => c.status === s).length})`}
+            {s === 'all'
+              ? `全部(${candidates.length})`
+              : `${statusLabels[s]?.label || s}(${candidates.filter(c => c.status === s).length})`}
           </button>
         ))}
       </div>
@@ -2130,32 +2309,62 @@ function CandidatesPanel({
 
       <div className="space-y-2">
         {filtered.map(c => {
-          const st = statusLabels[c.status] || { label: c.status, cls: 'text-[#6b7280]' }
+          const st = statusLabels[c.status] || {
+            label: c.status,
+            cls: 'text-[#6b7280]'
+          }
           return (
-            <div key={c.id} className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm">
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}>
+            <div
+              key={c.id}
+              className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm"
+            >
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${st.cls}`}
+              >
                 {st.label}
               </span>
-              <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">{c.question}</span>
-              <span className="shrink-0 text-[11px] text-[#9ca3af]">{topicLabels[c.topic] || c.topic}</span>
-              <span className="shrink-0 text-[11px] text-[#9ca3af]">问{c.count}次</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">
+                {c.question}
+              </span>
+              <span className="shrink-0 text-[11px] text-[#9ca3af]">
+                {topicLabels[c.topic] || c.topic}
+              </span>
+              <span className="shrink-0 text-[11px] text-[#9ca3af]">
+                问{c.count}次
+              </span>
               {c.status === 'pending' ? (
                 <>
-                  <button type="button" disabled={approving === c.id}
-                    onClick={async () => { setApproving(c.id); try { await onApprove(c.id) } finally { setApproving(null) } }}
+                  <button
+                    type="button"
+                    disabled={approving === c.id}
+                    onClick={async () => {
+                      setApproving(c.id)
+                      try {
+                        await onApprove(c.id)
+                      } finally {
+                        setApproving(null)
+                      }
+                    }}
                     className="shrink-0 rounded-lg bg-[#16a34a] px-3 py-1 text-[12px] font-medium text-white disabled:opacity-50"
-                  >通过</button>
-                  <button type="button"
+                  >
+                    通过
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onReject(c.id)}
                     className="shrink-0 rounded-lg border border-[#fecaca] px-3 py-1 text-[12px] font-medium text-[#dc2626]"
-                  >拒绝</button>
+                  >
+                    拒绝
+                  </button>
                 </>
               ) : null}
             </div>
           )
         })}
         {filtered.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">暂无候选问题</div>
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">
+            暂无候选问题
+          </div>
         ) : null}
       </div>
     </div>
@@ -2172,18 +2381,35 @@ function MetricsPanel({
 }: {
   metrics: MetricItem[]
   onReload: () => void
-  onCreate: (topic: string, metricName: string, displayName: string, unit: string, defaultThreshold: number | null, thresholdDirection: string) => Promise<void>
+  onCreate: (
+    topic: string,
+    metricName: string,
+    displayName: string,
+    unit: string,
+    defaultThreshold: number | null,
+    thresholdDirection: string
+  ) => Promise<void>
   onUpdate: (id: number, data: Partial<MetricItem>) => Promise<void>
   onDelete: (id: number) => Promise<void>
   onToggle: (id: number) => Promise<void>
 }) {
   const [topicFilter, setTopicFilter] = useState<string>('all')
   const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({ topic: 'traffic', metricName: '', displayName: '', unit: '', defaultThreshold: '' as string, thresholdDirection: 'up' })
+  const [createForm, setCreateForm] = useState({
+    topic: 'traffic',
+    metricName: '',
+    displayName: '',
+    unit: '',
+    defaultThreshold: '' as string,
+    thresholdDirection: 'up'
+  })
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState<Partial<MetricItem>>({})
 
-  const filtered = topicFilter === 'all' ? metrics : metrics.filter(m => m.topic === topicFilter)
+  const filtered =
+    topicFilter === 'all'
+      ? metrics
+      : metrics.filter(m => m.topic === topicFilter)
 
   const topicOpts: Array<{ key: string; label: string }> = [
     { key: 'all', label: '全部' },
@@ -2196,105 +2422,252 @@ function MetricsPanel({
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         {topicOpts.map(opt => (
-          <button key={opt.key} type="button"
+          <button
+            key={opt.key}
+            type="button"
             onClick={() => setTopicFilter(opt.key)}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              topicFilter === opt.key ? 'bg-[#333] text-white' : 'border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-[#f9fafb]'
+              topicFilter === opt.key
+                ? 'bg-[#333] text-white'
+                : 'border border-[#e5e7eb] bg-white text-[#6b7280] hover:bg-[#f9fafb]'
             }`}
-          >{opt.label}({opt.key === 'all' ? metrics.length : metrics.filter(m => m.topic === opt.key).length})</button>
+          >
+            {opt.label}(
+            {opt.key === 'all'
+              ? metrics.length
+              : metrics.filter(m => m.topic === opt.key).length}
+            )
+          </button>
         ))}
-        <button type="button" onClick={() => setShowCreate(v => !v)}
+        <button
+          type="button"
+          onClick={() => setShowCreate(v => !v)}
           className="ml-auto rounded-lg bg-[#333] px-4 py-2 text-sm font-medium text-white"
-        >新增指标</button>
+        >
+          新增指标
+        </button>
       </div>
 
       {showCreate ? (
         <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 space-y-3">
           <div className="grid grid-cols-3 gap-3">
-            <select value={createForm.topic} onChange={e => setCreateForm(f => ({ ...f, topic: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm">
+            <select
+              value={createForm.topic}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, topic: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            >
               <option value="traffic">车流</option>
               <option value="population">人流</option>
               <option value="grid">网格</option>
             </select>
-            <input placeholder="指标名(英)" value={createForm.metricName}
-              onChange={e => setCreateForm(f => ({ ...f, metricName: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
-            <input placeholder="显示名称" value={createForm.displayName}
-              onChange={e => setCreateForm(f => ({ ...f, displayName: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <input
+              placeholder="指标名(英)"
+              value={createForm.metricName}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, metricName: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
+            <input
+              placeholder="显示名称"
+              value={createForm.displayName}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, displayName: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <input placeholder="单位" value={createForm.unit}
-              onChange={e => setCreateForm(f => ({ ...f, unit: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
-            <input placeholder="默认阈值(选填)" type="number" value={createForm.defaultThreshold}
-              onChange={e => setCreateForm(f => ({ ...f, defaultThreshold: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
-            <select value={createForm.thresholdDirection}
-              onChange={e => setCreateForm(f => ({ ...f, thresholdDirection: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm">
+            <input
+              placeholder="单位"
+              value={createForm.unit}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, unit: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
+            <input
+              placeholder="默认阈值(选填)"
+              type="number"
+              value={createForm.defaultThreshold}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, defaultThreshold: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
+            <select
+              value={createForm.thresholdDirection}
+              onChange={e =>
+                setCreateForm(f => ({
+                  ...f,
+                  thresholdDirection: e.target.value
+                }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            >
               <option value="up">向上超阈值</option>
               <option value="down">向下超阈值</option>
             </select>
           </div>
           <div className="flex gap-2">
-            <button type="button" onClick={async () => {
-              if (!createForm.metricName) return
-              const threshold = createForm.defaultThreshold ? Number(createForm.defaultThreshold) : null
-              await onCreate(createForm.topic, createForm.metricName, createForm.displayName, createForm.unit, threshold, createForm.thresholdDirection)
-              setShowCreate(false)
-              setCreateForm({ topic: 'traffic', metricName: '', displayName: '', unit: '', defaultThreshold: '', thresholdDirection: 'up' })
-            }} className="rounded-lg bg-[#333] px-4 py-2 text-sm text-white">保存</button>
-            <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm">取消</button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!createForm.metricName) return
+                const threshold = createForm.defaultThreshold
+                  ? Number(createForm.defaultThreshold)
+                  : null
+                await onCreate(
+                  createForm.topic,
+                  createForm.metricName,
+                  createForm.displayName,
+                  createForm.unit,
+                  threshold,
+                  createForm.thresholdDirection
+                )
+                setShowCreate(false)
+                setCreateForm({
+                  topic: 'traffic',
+                  metricName: '',
+                  displayName: '',
+                  unit: '',
+                  defaultThreshold: '',
+                  thresholdDirection: 'up'
+                })
+              }}
+              className="rounded-lg bg-[#333] px-4 py-2 text-sm text-white"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreate(false)}
+              className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm"
+            >
+              取消
+            </button>
           </div>
         </div>
       ) : null}
 
       <div className="space-y-2">
         {filtered.map(m => (
-          <div key={m.id} className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm">
+          <div
+            key={m.id}
+            className="rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm"
+          >
             {editingId === m.id ? (
               <div className="space-y-2">
                 <div className="grid grid-cols-3 gap-2">
-                  <input value={editForm.displayName || ''} placeholder="显示名称"
-                    onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))}
-                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm" />
-                  <input value={editForm.unit || ''} placeholder="单位"
-                    onChange={e => setEditForm(f => ({ ...f, unit: e.target.value }))}
-                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm" />
-                  <input value={editForm.defaultThreshold ?? ''} placeholder="阈值" type="number"
-                    onChange={e => setEditForm(f => ({ ...f, defaultThreshold: e.target.value ? Number(e.target.value) : null }))}
-                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm" />
+                  <input
+                    value={editForm.displayName || ''}
+                    placeholder="显示名称"
+                    onChange={e =>
+                      setEditForm(f => ({ ...f, displayName: e.target.value }))
+                    }
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm"
+                  />
+                  <input
+                    value={editForm.unit || ''}
+                    placeholder="单位"
+                    onChange={e =>
+                      setEditForm(f => ({ ...f, unit: e.target.value }))
+                    }
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm"
+                  />
+                  <input
+                    value={editForm.defaultThreshold ?? ''}
+                    placeholder="阈值"
+                    type="number"
+                    onChange={e =>
+                      setEditForm(f => ({
+                        ...f,
+                        defaultThreshold: e.target.value
+                          ? Number(e.target.value)
+                          : null
+                      }))
+                    }
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-sm"
+                  />
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={async () => {
-                    await onUpdate(m.id, editForm)
-                    setEditingId(null)
-                  }} className="rounded-lg bg-[#333] px-3 py-1 text-[12px] text-white">保存</button>
-                  <button type="button" onClick={() => setEditingId(null)} className="rounded-lg border border-[#e5e7eb] px-3 py-1 text-[12px]">取消</button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onUpdate(m.id, editForm)
+                      setEditingId(null)
+                    }}
+                    className="rounded-lg bg-[#333] px-3 py-1 text-[12px] text-white"
+                  >
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className="rounded-lg border border-[#e5e7eb] px-3 py-1 text-[12px]"
+                  >
+                    取消
+                  </button>
                 </div>
               </div>
             ) : (
               <div className="flex items-center gap-3">
-                <button type="button" onClick={() => onToggle(m.id)}
-                  className={`shrink-0 h-4 w-7 rounded-full transition-colors ${m.isActive ? 'bg-[#16a34a]' : 'bg-[#d1d5db]'} relative`}>
-                  <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${m.isActive ? 'left-3.5' : 'left-0.5'}`} />
+                <button
+                  type="button"
+                  onClick={() => onToggle(m.id)}
+                  className={`shrink-0 h-4 w-7 rounded-full transition-colors ${m.isActive ? 'bg-[#16a34a]' : 'bg-[#d1d5db]'} relative`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform ${m.isActive ? 'left-3.5' : 'left-0.5'}`}
+                  />
                 </button>
-                <span className="shrink-0 text-[11px] text-[#9ca3af]">{topicLabels[m.topic as TopicKey] || m.topic}</span>
-                <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">{m.displayName || m.metricName}</span>
-                {m.defaultThreshold != null ? <span className="shrink-0 text-[11px] text-[#6b7280]">阈值{m.defaultThreshold}{m.unit}</span> : null}
-                <span className="shrink-0 text-[11px] text-[#9ca3af]">{m.unit}</span>
-                <button type="button" onClick={() => { setEditingId(m.id); setEditForm({ displayName: m.displayName, unit: m.unit, defaultThreshold: m.defaultThreshold, description: m.description }) }}
-                  className="shrink-0 text-[12px] text-[#2563eb] hover:underline">编辑</button>
-                <button type="button" onClick={() => onDelete(m.id)}
-                  className="shrink-0 text-[12px] text-[#dc2626] hover:underline">删除</button>
+                <span className="shrink-0 text-[11px] text-[#9ca3af]">
+                  {topicLabels[m.topic as TopicKey] || m.topic}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">
+                  {m.displayName || m.metricName}
+                </span>
+                {m.defaultThreshold != null ? (
+                  <span className="shrink-0 text-[11px] text-[#6b7280]">
+                    阈值{m.defaultThreshold}
+                    {m.unit}
+                  </span>
+                ) : null}
+                <span className="shrink-0 text-[11px] text-[#9ca3af]">
+                  {m.unit}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingId(m.id)
+                    setEditForm({
+                      displayName: m.displayName,
+                      unit: m.unit,
+                      defaultThreshold: m.defaultThreshold,
+                      description: m.description
+                    })
+                  }}
+                  className="shrink-0 text-[12px] text-[#2563eb] hover:underline"
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(m.id)}
+                  className="shrink-0 text-[12px] text-[#dc2626] hover:underline"
+                >
+                  删除
+                </button>
               </div>
             )}
           </div>
         ))}
         {filtered.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">暂无指标记录</div>
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">
+            暂无指标记录
+          </div>
         ) : null}
       </div>
     </div>
@@ -2323,15 +2696,28 @@ function DocumentsPanel({
   onAutoDiscover: (knowledgeCode: string, dryRun: boolean) => Promise<void>
   onComplianceCheck: (knowledgeCode?: string) => Promise<void>
   onDeleteRelation: (id: number) => Promise<void>
-  onCreateRelation: (fromDocId: number, toDocId: number, relType: string, description: string) => Promise<void>
+  onCreateRelation: (
+    fromDocId: number,
+    toDocId: number,
+    relType: string,
+    description: string
+  ) => Promise<void>
 }) {
   const [relFilter, setRelFilter] = useState<string>('all')
   const [discovering, setDiscovering] = useState(false)
   const [checking, setChecking] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({ fromDocId: '', toDocId: '', relType: 'reference', description: '' })
+  const [createForm, setCreateForm] = useState({
+    fromDocId: '',
+    toDocId: '',
+    relType: 'reference',
+    description: ''
+  })
 
-  const filtered = relFilter === 'all' ? relations : relations.filter(r => r.relType === relFilter)
+  const filtered =
+    relFilter === 'all'
+      ? relations
+      : relations.filter(r => r.relType === relFilter)
 
   return (
     <div className="space-y-6">
@@ -2347,64 +2733,130 @@ function DocumentsPanel({
           <option value="repeal">废止</option>
           <option value="related">相关</option>
         </select>
-        <span className="text-sm text-[#6b7280]">共 {filtered.length} 条关联</span>
+        <span className="text-sm text-[#6b7280]">
+          共 {filtered.length} 条关联
+        </span>
         <button
           type="button"
           onClick={() => setShowCreate(v => !v)}
           className="ml-auto rounded-lg bg-[#333] px-4 py-2 text-sm font-medium text-white"
-        >新建关联</button>
+        >
+          新建关联
+        </button>
       </div>
 
       {showCreate ? (
         <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <input placeholder="来源文档ID" value={createForm.fromDocId}
-              onChange={e => setCreateForm(f => ({ ...f, fromDocId: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
-            <input placeholder="目标文档ID" value={createForm.toDocId}
-              onChange={e => setCreateForm(f => ({ ...f, toDocId: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <input
+              placeholder="来源文档ID"
+              value={createForm.fromDocId}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, fromDocId: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
+            <input
+              placeholder="目标文档ID"
+              value={createForm.toDocId}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, toDocId: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
           </div>
           <div className="flex gap-3">
-            <select value={createForm.relType}
-              onChange={e => setCreateForm(f => ({ ...f, relType: e.target.value }))}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm">
+            <select
+              value={createForm.relType}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, relType: e.target.value }))
+              }
+              className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            >
               <option value="reference">引用</option>
               <option value="supplement">补充</option>
               <option value="repeal">废止</option>
               <option value="related">相关</option>
             </select>
-            <input placeholder="描述（选填）" value={createForm.description}
-              onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
-              className="min-w-0 flex-1 rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm" />
+            <input
+              placeholder="描述（选填）"
+              value={createForm.description}
+              onChange={e =>
+                setCreateForm(f => ({ ...f, description: e.target.value }))
+              }
+              className="min-w-0 flex-1 rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm"
+            />
           </div>
           <div className="flex gap-2">
-            <button type="button" onClick={async () => {
-              const fromId = Number(createForm.fromDocId)
-              const toId = Number(createForm.toDocId)
-              if (fromId && toId) {
-                await onCreateRelation(fromId, toId, createForm.relType, createForm.description)
-                setShowCreate(false)
-                setCreateForm({ fromDocId: '', toDocId: '', relType: 'reference', description: '' })
-              }
-            }} className="rounded-lg bg-[#333] px-4 py-2 text-sm text-white">保存</button>
-            <button type="button" onClick={() => setShowCreate(false)} className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm">取消</button>
+            <button
+              type="button"
+              onClick={async () => {
+                const fromId = Number(createForm.fromDocId)
+                const toId = Number(createForm.toDocId)
+                if (fromId && toId) {
+                  await onCreateRelation(
+                    fromId,
+                    toId,
+                    createForm.relType,
+                    createForm.description
+                  )
+                  setShowCreate(false)
+                  setCreateForm({
+                    fromDocId: '',
+                    toDocId: '',
+                    relType: 'reference',
+                    description: ''
+                  })
+                }
+              }}
+              className="rounded-lg bg-[#333] px-4 py-2 text-sm text-white"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreate(false)}
+              className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm"
+            >
+              取消
+            </button>
           </div>
         </div>
       ) : null}
 
       <div className="space-y-2">
         {filtered.map(r => (
-          <div key={r.id} className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm">
-            <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">{r.fromDocTitle}</span>
-            <span className="shrink-0 rounded-full bg-[#f3f4f6] px-2.5 py-0.5 text-[11px] font-semibold text-[#6b7280]">{relTypeLabels[r.relType] || r.relType}</span>
-            <span className="min-w-0 flex-1 truncate text-[#6b7280]">{r.toDocTitle}</span>
-            {r.description ? <span className="shrink-0 text-[11px] text-[#9ca3af]">{r.description}</span> : null}
-            <button type="button" onClick={() => onDeleteRelation(r.id)} className="shrink-0 text-[12px] text-[#dc2626] hover:underline">删除</button>
+          <div
+            key={r.id}
+            className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm"
+          >
+            <span className="min-w-0 flex-1 truncate font-medium text-[#374151]">
+              {r.fromDocTitle}
+            </span>
+            <span className="shrink-0 rounded-full bg-[#f3f4f6] px-2.5 py-0.5 text-[11px] font-semibold text-[#6b7280]">
+              {relTypeLabels[r.relType] || r.relType}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[#6b7280]">
+              {r.toDocTitle}
+            </span>
+            {r.description ? (
+              <span className="shrink-0 text-[11px] text-[#9ca3af]">
+                {r.description}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => onDeleteRelation(r.id)}
+              className="shrink-0 text-[12px] text-[#dc2626] hover:underline"
+            >
+              删除
+            </button>
           </div>
         ))}
         {filtered.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">暂无文档关联记录</div>
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] px-5 py-4 text-sm text-[#9ca3af]">
+            暂无文档关联记录
+          </div>
         ) : null}
       </div>
 
@@ -2414,30 +2866,53 @@ function DocumentsPanel({
           disabled={discovering}
           onClick={async () => {
             setDiscovering(true)
-            try { await onAutoDiscover('', true) } finally { setDiscovering(false) }
+            try {
+              await onAutoDiscover('', true)
+            } finally {
+              setDiscovering(false)
+            }
           }}
           className="rounded-lg border border-[#e5e7eb] bg-white px-4 py-2 text-sm font-medium text-[#374151] disabled:opacity-50"
-        >{discovering ? '扫描中...' : '自动发现关联（预览）'}</button>
+        >
+          {discovering ? '扫描中...' : '自动发现关联（预览）'}
+        </button>
         <button
           type="button"
           disabled={checking}
           onClick={async () => {
             setChecking(true)
-            try { await onComplianceCheck() } finally { setChecking(false) }
+            try {
+              await onComplianceCheck()
+            } finally {
+              setChecking(false)
+            }
           }}
           className="rounded-lg border border-[#e5e7eb] bg-white px-4 py-2 text-sm font-medium text-[#374151] disabled:opacity-50"
-        >{checking ? '检查中...' : '合规检查'}</button>
+        >
+          {checking ? '检查中...' : '合规检查'}
+        </button>
       </div>
 
       {complianceIssues.length > 0 ? (
         <div className="space-y-2">
-          <div className="text-sm font-semibold text-[#dc2626]">合规告警（{complianceIssues.length}）</div>
+          <div className="text-sm font-semibold text-[#dc2626]">
+            合规告警（{complianceIssues.length}）
+          </div>
           {complianceIssues.map((issue, i) => (
-            <div key={i} className="rounded-xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm">
+            <div
+              key={i}
+              className="rounded-xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm"
+            >
               <div className="flex items-center gap-2">
-                <span className="font-medium text-[#dc2626]">[{issue.severity}]</span>
-                <span className="font-medium text-[#374151]">{issue.documentTitle}</span>
-                <span className="rounded-full bg-[#fef2f2] px-2 py-0.5 text-[11px] text-[#dc2626]">{issue.issueType}</span>
+                <span className="font-medium text-[#dc2626]">
+                  [{issue.severity}]
+                </span>
+                <span className="font-medium text-[#374151]">
+                  {issue.documentTitle}
+                </span>
+                <span className="rounded-full bg-[#fef2f2] px-2 py-0.5 text-[11px] text-[#dc2626]">
+                  {issue.issueType}
+                </span>
               </div>
               <p className="mt-1 text-[#6b7280]">{issue.description}</p>
             </div>

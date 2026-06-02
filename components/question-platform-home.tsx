@@ -5,6 +5,8 @@ import Link from 'next/link'
 
 import { LogOut, UserRound } from 'lucide-react'
 
+import { useChatDbAuth } from '@/lib/contexts/chatdb-auth-context'
+
 type Topic = {
   code?: string
   label: string
@@ -46,6 +48,7 @@ function topicLabel(topic: Topic) {
 }
 
 export function QuestionPlatformHome() {
+  const { username, logout: authLogout } = useChatDbAuth()
   const [topics, setTopics] = useState<Topic[]>([])
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [loadingTopics, setLoadingTopics] = useState(true)
@@ -53,40 +56,47 @@ export function QuestionPlatformHome() {
   const [userName, setUserName] = useState('用户')
   const [profileOpen, setProfileOpen] = useState(false)
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null)
-  const [exampleQuestions, setExampleQuestions] = useState<ExampleQuestion[]>([])
+  const [exampleQuestions, setExampleQuestions] = useState<ExampleQuestion[]>(
+    []
+  )
   const profileRef = useRef<HTMLDivElement>(null)
   const topicQuery = topics.map(topic => topicCode(topic)).join(',')
 
   useEffect(() => {
-    queueMicrotask(() => {
-      const storedName = window.localStorage.getItem('chatdb_user_name')
-      if (storedName) {
-        setUserName(storedName)
-      }
-    })
-  }, [])
+    if (username) setUserName(username)
+  }, [username])
 
   useEffect(() => {
     let active = true
-    fetch('/api/chatdb/user/bootstrap', { cache: 'no-store', credentials: 'include' })
+    fetch('/api/chatdb/user/bootstrap', {
+      cache: 'no-store',
+      credentials: 'include'
+    })
       .then(r => r.json())
       .then(json => {
         if (active && json?.data) setBootstrap(json.data)
       })
       .catch(() => {})
-    return () => { active = false }
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
     let active = true
-    fetch('/api/chatdb/example-questions', { cache: 'no-store', credentials: 'include' })
+    fetch('/api/chatdb/example-questions', {
+      cache: 'no-store',
+      credentials: 'include'
+    })
       .then(r => r.json())
       .then(json => {
         const list = json?.data?.list || json?.list || []
         if (active && Array.isArray(list)) setExampleQuestions(list.slice(0, 6))
       })
       .catch(() => {})
-    return () => { active = false }
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
@@ -189,10 +199,7 @@ export function QuestionPlatformHome() {
   }
 
   const logout = async () => {
-    await fetch('/api/chatdb/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined)
-    window.localStorage.removeItem('chatdb_user_login')
-    window.localStorage.removeItem('chatdb_user_name')
-    window.location.reload()
+    await authLogout('user')
   }
 
   return (
@@ -280,13 +287,16 @@ export function QuestionPlatformHome() {
 
             {exampleQuestions.length > 0 ? (
               <div className="mt-8">
-                <h3 className="text-[16px] font-medium text-[#9aa0aa]">试试这样问</h3>
+                <h3 className="text-[16px] font-medium text-[#9aa0aa]">
+                  试试这样问
+                </h3>
                 <div className="mt-3 space-y-2">
                   {exampleQuestions.map(eq => {
                     const topic = topics.find(t => topicCode(t) === eq.topic)
-                    const href = eq.topic === 'qa'
-                      ? `/ask?topic=grid&q=${encodeURIComponent(eq.question)}`
-                      : `/ask?topic=${eq.topic || ''}&q=${encodeURIComponent(eq.question)}`
+                    const href =
+                      eq.topic === 'qa'
+                        ? `/ask?topic=grid&q=${encodeURIComponent(eq.question)}`
+                        : `/ask?topic=${eq.topic || ''}&q=${encodeURIComponent(eq.question)}`
                     return (
                       <Link
                         key={eq.id}
