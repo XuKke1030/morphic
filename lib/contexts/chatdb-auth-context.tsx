@@ -88,20 +88,29 @@ export function ChatDbAuthProvider({
    */
   const validateSession = useCallback(async (mode: ChatDbAuthMode) => {
     try {
-      const response = await fetch('/api/chatdb/permissions', {
+      // admin 和 user 使用不同的验证接口：
+      // - admin: 调 /api/chatdb/admin/profile（tokenSource='admin'，读 chatdb_admin_token cookie）
+      // - user: 调 /api/chatdb/permissions（tokenSource='user'，读 chatdb_token cookie）
+      // 两者不能混用，因为 httpOnly cookie 的 path 不同，浏览器只在匹配路径下发送
+      const validatePath =
+        mode === 'admin'
+          ? '/api/chatdb/admin/profile'
+          : '/api/chatdb/permissions'
+      const response = await fetch(validatePath, {
         cache: 'no-store',
         credentials: 'include'
       })
       const payload = await response.json().catch(() => null)
       const data = payload?.data || payload
-      if (data?.authenticated) {
-        // token 有效，更新认证状态
+      if (data?.authenticated || data?.username) {
         if (mode === 'user') setUserAuthenticated(true)
         if (mode === 'admin') setAdminAuthenticated(true)
-        if (data.username) setUsername(data.username)
+        if (data.username) {
+          if (mode === 'admin') setAdminUsername(data.username)
+          else setUsername(data.username)
+        }
         lastValidatedRef.current = Date.now()
       } else {
-        // token 无效或过期，清除认证状态 + cookie
         if (mode === 'user') {
           setUserAuthenticated(false)
           deleteCookie('chatdb_auth_status')
@@ -112,7 +121,6 @@ export function ChatDbAuthProvider({
         }
       }
     } catch {
-      // 网络错误等异常情况，降级为未认证
       if (mode === 'user') setUserAuthenticated(false)
       if (mode === 'admin') setAdminAuthenticated(false)
     }

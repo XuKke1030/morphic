@@ -11,12 +11,17 @@ import {
 
 import {
   AlertTriangle,
+  BookOpen,
+  ChevronLeft,
+  Database,
   Download,
   FileText,
+  LayoutDashboard,
   LogOut,
   Plus,
   RefreshCw,
   Search,
+  Shield,
   Upload,
   X
 } from 'lucide-react'
@@ -207,24 +212,49 @@ const sourceLabels: Record<TopicKey, string> = {
 
 const menuGroups: Array<{
   title: string
-  items: Array<{ key: AdminSection; label: string }>
+  items: Array<{ key: AdminSection; label: string; icon: React.ElementType }>
 }> = [
-  { title: '概览', items: [{ key: 'overview', label: '首页' }] },
-  { title: '权限管理', items: [{ key: 'users', label: '用户权限管理' }] },
+  {
+    title: '概览',
+    items: [{ key: 'overview', label: '首页', icon: LayoutDashboard }]
+  },
+  {
+    title: '权限管理',
+    items: [{ key: 'users', label: '用户权限管理', icon: Shield }]
+  },
   {
     title: '内容管理',
     items: [
-      { key: 'questions' as AdminSection, label: '示例问题管理' },
-      { key: 'candidates' as AdminSection, label: '问题沉淀管理' },
-      { key: 'documents' as AdminSection, label: '文档关联管理' }
+      {
+        key: 'questions' as AdminSection,
+        label: '示例问题管理',
+        icon: BookOpen
+      },
+      {
+        key: 'candidates' as AdminSection,
+        label: '问题沉淀管理',
+        icon: Search
+      },
+      {
+        key: 'documents' as AdminSection,
+        label: '文档关联管理',
+        icon: FileText
+      }
     ]
   },
-  { title: '数据接入', items: [{ key: 'data', label: '数据接入管理' }] },
+  {
+    title: '数据接入',
+    items: [{ key: 'data', label: '数据接入管理', icon: Database }]
+  },
   {
     title: '系统',
     items: [
-      { key: 'metrics' as AdminSection, label: '指标目录管理' },
-      { key: 'logs', label: '操作日志' }
+      {
+        key: 'metrics' as AdminSection,
+        label: '指标目录管理',
+        icon: AlertTriangle
+      },
+      { key: 'logs', label: '操作日志', icon: RefreshCw }
     ]
   }
 ]
@@ -500,6 +530,7 @@ function SourceStatusCard({
 
 export function AdminDashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>('overview')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [questions, setQuestions] = useState<ExampleQuestion[]>([])
   const [dataSources, setDataSources] = useState<DataSource[]>([])
@@ -1009,32 +1040,60 @@ export function AdminDashboard() {
 
   return (
     <div className="flex h-full min-h-0 bg-[#f4f4f6] text-[#05070a]">
-      <aside className="flex w-[300px] shrink-0 flex-col border-r border-[#e2e4e8] bg-white">
-        <div className="flex h-[82px] items-center border-b border-[#eceef2] px-7">
-          <div className="text-[28px] font-bold tracking-normal">问答问数</div>
+      <aside
+        className={`flex shrink-0 flex-col border-r border-[#e2e4e8] bg-white transition-[width] duration-200 ${sidebarCollapsed ? 'w-[68px]' : 'w-[300px]'}`}
+      >
+        <div className="flex h-[82px] items-center border-b border-[#eceef2] px-4">
+          {!sidebarCollapsed && (
+            <div className="min-w-0 flex-1 px-3 text-[28px] font-bold tracking-normal">
+              问答问数
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed(v => !v)}
+            className={`flex h-8 w-8 items-center justify-center rounded-md text-[#64748b] hover:bg-[#f1f1f3] ${sidebarCollapsed ? 'mx-auto' : ''}`}
+          >
+            <ChevronLeft
+              className={`h-5 w-5 transition-transform duration-200 ${sidebarCollapsed ? 'rotate-180' : ''}`}
+            />
+          </button>
         </div>
 
-        <nav className="flex-1 py-6">
+        <nav className="min-h-0 flex-1 overflow-y-auto py-6">
           {menuGroups.map(group => (
             <div key={group.title} className="mb-7">
-              <div className="px-7 text-lg font-bold text-[#c3c7ce]">
-                {group.title}
-              </div>
-              <div className="mt-3">
+              {!sidebarCollapsed && (
+                <div className="px-7 text-lg font-bold text-[#c3c7ce]">
+                  {group.title}
+                </div>
+              )}
+              <div className={sidebarCollapsed ? '' : 'mt-3'}>
                 {group.items.map(item => {
                   const active = activeSection === item.key
+                  const Icon = item.icon
                   return (
                     <button
                       key={item.key}
                       type="button"
                       onClick={() => setActiveSection(item.key)}
+                      title={sidebarCollapsed ? item.label : undefined}
                       className={
                         active
-                          ? 'relative flex h-[54px] w-full items-center bg-[#f1f1f3] px-8 text-[22px] font-bold text-[#05070a] before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:bg-[#111]'
-                          : 'flex h-[54px] w-full items-center px-8 text-[22px] text-[#1f2937] hover:bg-[#f7f7f8]'
+                          ? 'relative flex h-[54px] w-full items-center bg-[#f1f1f3] px-4 text-[22px] font-bold text-[#05070a] before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:bg-[#111]' +
+                            (sidebarCollapsed ? ' justify-center' : ' px-8')
+                          : 'flex h-[54px] w-full items-center text-[22px] text-[#1f2937] hover:bg-[#f7f7f8]' +
+                            (sidebarCollapsed ? ' justify-center' : ' px-8')
                       }
                     >
-                      {item.label}
+                      {sidebarCollapsed ? (
+                        <Icon className="h-5 w-5" />
+                      ) : (
+                        <>
+                          <Icon className="mr-3 h-5 w-5" />
+                          {item.label}
+                        </>
+                      )}
                     </button>
                   )
                 })}
@@ -1043,25 +1102,41 @@ export function AdminDashboard() {
           ))}
         </nav>
 
-        <div className="border-t border-[#eceef2] px-7 py-7">
-          <div className="flex items-center gap-4">
-            <div className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#111] text-lg font-bold text-white">
-              管
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xl font-bold leading-tight">
-                {adminUsername || 'admin'}
+        <div className="border-t border-[#eceef2] px-4 py-4">
+          {!sidebarCollapsed ? (
+            <div className="flex items-center gap-4 px-3">
+              <div className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#111] text-lg font-bold text-white">
+                管
               </div>
-              <div className="mt-1 text-base text-[#a1a7b1]">超级管理员</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xl font-bold leading-tight">
+                  {adminUsername || 'admin'}
+                </div>
+                <div className="mt-1 text-base text-[#a1a7b1]">超级管理员</div>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="rounded-lg border border-[#e2e4e8] px-3 py-2 text-sm text-[#333] hover:bg-[#f5f6f8]"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={logout}
-              className="rounded-lg border border-[#e2e4e8] px-3 py-2 text-sm text-[#333] hover:bg-[#f5f6f8]"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex h-[36px] w-[36px] items-center justify-center rounded-full bg-[#111] text-base font-bold text-white">
+                管
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="rounded-lg p-2 text-[#999] hover:bg-[#f5f6f8]"
+                title="退出登录"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
