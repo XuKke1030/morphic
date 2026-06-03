@@ -143,7 +143,14 @@ type ChartSeries = {
   data: number[]
 }
 
-type ChartType = 'line' | 'bar' | 'bar_compare' | 'bar_rank' | 'pie' | 'table' | 'metric_card'
+type ChartType =
+  | 'line'
+  | 'bar'
+  | 'bar_compare'
+  | 'bar_rank'
+  | 'pie'
+  | 'table'
+  | 'metric_card'
 
 type ChartPayload = {
   type?: ChartType
@@ -301,7 +308,13 @@ function parseRichContent(content: string): RichBlock[] {
           payload: {
             ...payload,
             type:
-              language === 'chatdb-line-chart' ? 'line' : (payload.type === 'bar_compare' ? 'bar_compare' : payload.type === 'bar_rank' ? 'bar_rank' : payload.type || 'line')
+              language === 'chatdb-line-chart'
+                ? 'line'
+                : payload.type === 'bar_compare'
+                  ? 'bar_compare'
+                  : payload.type === 'bar_rank'
+                    ? 'bar_rank'
+                    : payload.type || 'line'
           }
         })
       }
@@ -367,9 +380,10 @@ function buildLinePath(
   const span = max - min || 1
   return values
     .map((value, index) => {
-      const x = values.length === 1
-        ? width / 2
-        : offsetX + index * groupWidth + groupWidth / 2
+      const x =
+        values.length === 1
+          ? width / 2
+          : offsetX + index * groupWidth + groupWidth / 2
       const y = height - ((value - min) / span) * height
       return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
     })
@@ -398,7 +412,10 @@ function aggregatePieData(labels: string[], series: ChartSeries[]) {
   const groups = new Map<string, number>()
 
   data.forEach((value, index) => {
-    const label = (labels[index] || `项目${index + 1}`).trim().replace(/[（(][\s\S]*?[）)]$/, '').trim()
+    const label = (labels[index] || `项目${index + 1}`)
+      .trim()
+      .replace(/[（(][\s\S]*?[）)]$/, '')
+      .trim()
     groups.set(label, (groups.get(label) || 0) + value)
   })
 
@@ -456,16 +473,29 @@ function svgToDataUrl(svgMarkup: string) {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgMarkup)))}`
 }
 
-function applyChartTopN(labels: string[], series: ChartSeries[], topN: number | undefined) {
-  if (!topN || topN <= 0 || labels.length <= topN || !series.length) return { labels, series }
+function applyChartTopN(
+  labels: string[],
+  series: ChartSeries[],
+  topN: number | undefined
+) {
+  if (!topN || topN <= 0 || labels.length <= topN || !series.length)
+    return { labels, series }
   const primarySeries = series[0]
-  const indexed = labels.map((label, i) => ({ label, value: primarySeries.data[i] ?? 0 }))
+  const indexed = labels.map((label, i) => ({
+    label,
+    value: primarySeries.data[i] ?? 0
+  }))
   indexed.sort((a, b) => b.value - a.value)
   const kept = new Set(indexed.slice(0, topN).map(item => item.label))
-  const keepIndices = labels.map((label, i) => kept.has(label) ? i : -1).filter(i => i >= 0)
+  const keepIndices = labels
+    .map((label, i) => (kept.has(label) ? i : -1))
+    .filter(i => i >= 0)
   return {
     labels: keepIndices.map(i => labels[i]),
-    series: series.map(item => ({ ...item, data: keepIndices.map(i => item.data[i]) }))
+    series: series.map(item => ({
+      ...item,
+      data: keepIndices.map(i => item.data[i])
+    }))
   }
 }
 
@@ -657,24 +687,26 @@ function buildChartImageSvg({
     const svgWidth = Math.max(width, contentWidth + 64)
     const svgHeight = titleHeight + contentHeight + 48
 
-    const cards = tableRows.map((row, index) => {
-      const col = index % cols
-      const rowNum = Math.floor(index / cols)
-      const x = 32 + col * (cardWidth + gap)
-      const y = titleHeight + 16 + rowNum * (cardHeight + gap)
-      const label = escapeSvgText(String(row[0] ?? ''))
-      const value = escapeSvgText(row[1] != null ? String(row[1]) : '—')
-      const isPrimary = index === 0
-      const borderColor = isPrimary ? '#4f83ff' : '#e8eef8'
-      const bgColor = isPrimary ? '#f0f5ff' : '#ffffff'
-      const valueColor = isPrimary ? '#4f83ff' : '#111827'
-      const valueSize = isPrimary ? '28' : '22'
-      return `
+    const cards = tableRows
+      .map((row, index) => {
+        const col = index % cols
+        const rowNum = Math.floor(index / cols)
+        const x = 32 + col * (cardWidth + gap)
+        const y = titleHeight + 16 + rowNum * (cardHeight + gap)
+        const label = escapeSvgText(String(row[0] ?? ''))
+        const value = escapeSvgText(row[1] != null ? String(row[1]) : '—')
+        const isPrimary = index === 0
+        const borderColor = isPrimary ? '#4f83ff' : '#e8eef8'
+        const bgColor = isPrimary ? '#f0f5ff' : '#ffffff'
+        const valueColor = isPrimary ? '#4f83ff' : '#111827'
+        const valueSize = isPrimary ? '28' : '22'
+        return `
         <rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="12" fill="${bgColor}" stroke="${borderColor}" stroke-width="${isPrimary ? 2 : 1}"/>
         <text x="${x + 16}" y="${y + 28}" font-size="12" fill="#6b7280">${label}</text>
         <text x="${x + 16}" y="${y + 58}" font-size="${valueSize}" font-weight="700" fill="${valueColor}">${value}</text>
       `
-    }).join('')
+      })
+      .join('')
 
     return `
       <svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">
@@ -690,10 +722,14 @@ function buildChartImageSvg({
     <line x1="${left}" y1="${top + chartHeight}" x2="${left + chartWidth}" y2="${top + chartHeight}" stroke="#d1d5db"/>
     <text x="${left - 8}" y="${top + chartHeight + 3}" font-family="${fontFamily}" font-size="10" text-anchor="end" fill="#9ca3af">0</text>
     <text x="${left - 8}" y="${top + 4}" font-family="${fontFamily}" font-size="10" text-anchor="end" fill="#9ca3af">${max}</text>
-    ${[0.25, 0.5, 0.75].map(r => `
+    ${[0.25, 0.5, 0.75]
+      .map(
+        r => `
       <line x1="${left}" y1="${top + chartHeight * (1 - r)}" x2="${left + chartWidth}" y2="${top + chartHeight * (1 - r)}" stroke="#f3f4f6" stroke-dasharray="4 3"/>
       <text x="${left - 8}" y="${top + chartHeight * (1 - r) + 3}" font-family="${fontFamily}" font-size="10" text-anchor="end" fill="#d1d5db">${Math.round(max * r)}</text>
-    `).join('')}
+    `
+      )
+      .join('')}
   `
   const labelSvg = labels
     .map((label, index) => {
@@ -717,7 +753,12 @@ function buildChartImageSvg({
       }
       const cleanLabel = label.replace(/[（(][\s\S]*?[）)]$/, '').trim()
       const lines = splitForCopy(cleanLabel).map(l => escapeSvgText(l))
-      return lines.map((line, li) => `<text x="${x}" y="${top + chartHeight + 22 + li * 14}" font-family="${fontFamily}" font-size="11" text-anchor="middle" fill="#6b7280">${line}</text>`).join('')
+      return lines
+        .map(
+          (line, li) =>
+            `<text x="${x}" y="${top + chartHeight + 22 + li * 14}" font-family="${fontFamily}" font-size="11" text-anchor="middle" fill="#6b7280">${line}</text>`
+        )
+        .join('')
     })
     .join('')
   const seriesSvg = series
@@ -864,7 +905,13 @@ async function copySvgAsPng(svgMarkup: string) {
   return false
 }
 
-function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }) {
+function ChatDbChart({
+  payload,
+  topN
+}: {
+  payload: ChartPayload
+  topN?: number
+}) {
   const [activeType, setActiveType] = useState<ChartType>(
     payload.type || 'line'
   )
@@ -878,11 +925,14 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
   let series = rawSeries
   if (topN && topN > 0 && labels.length > topN && series.length) {
     const primarySeries = series[0]
-    const indexed = labels.map((label, i) => ({ label, value: primarySeries.data[i] ?? 0 }))
+    const indexed = labels.map((label, i) => ({
+      label,
+      value: primarySeries.data[i] ?? 0
+    }))
     indexed.sort((a, b) => b.value - a.value)
     const kept = new Set(indexed.slice(0, topN).map(item => item.label))
     const keepIndices = labels
-      .map((label, i) => kept.has(label) ? i : -1)
+      .map((label, i) => (kept.has(label) ? i : -1))
       .filter(i => i >= 0)
     labels = keepIndices.map(i => labels[i])
     series = series.map(item => ({
@@ -1069,7 +1119,7 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
         <div className="overflow-x-auto">
           <svg
             className="min-w-[360px]"
-            viewBox={"0 0 360 " + (20 + labels.length * 32)}
+            viewBox={'0 0 360 ' + (20 + labels.length * 32)}
             role="img"
             aria-label={payload.title || '问数排名图'}
           >
@@ -1145,195 +1195,231 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
       ) : series.length ? (
         <div className="overflow-x-auto">
           {(() => {
-            const barLayout = activeType === 'bar' ? (() => {
-              const rawGroupWidth = chartWidth / Math.max(labels.length, 1)
-              const maxGroupWidth = 80
-              const groupWidth = Math.min(rawGroupWidth, maxGroupWidth)
-              const totalBarsWidth = groupWidth * labels.length
-              const barOffset = (chartWidth - totalBarsWidth) / 2
-              const barWidth = Math.min(Math.max((groupWidth * 0.72) / Math.max(series.length, 1), 8), 48)
-              return { groupWidth, barOffset, barWidth }
-            })() : null
-            return (<svg
-            className="min-w-[360px]"
-            viewBox={`0 0 ${chartWidth + axisLeft + 12} ${chartHeight + axisTop + axisLabelHeight}`}
-            role="img"
-            aria-label={payload.title || '问数图表'}
-          >
-            <line
-              x1={axisLeft}
-              y1={axisTop}
-              x2={axisLeft}
-              y2={chartHeight + axisTop}
-              stroke="#e5e7eb"
-            />
-            <line
-              x1={axisLeft}
-              y1={chartHeight + axisTop}
-              x2={chartWidth + axisLeft}
-              y2={chartHeight + axisTop}
-              stroke="#e5e7eb"
-            />
-            <text
-              x={axisLeft - 8}
-              y={chartHeight + axisTop + 3}
-              textAnchor="end"
-              fontSize="10"
-              fill="#9ca3af"
-            >
-              0
-            </text>
-            <text
-              x={axisLeft - 8}
-              y={axisTop + 4}
-              textAnchor="end"
-              fontSize="10"
-              fill="#9ca3af"
-            >
-              {max}
-            </text>
-            {[0.25, 0.5, 0.75].map(ratio => (
-              <g key={ratio}>
+            const barLayout =
+              activeType === 'bar'
+                ? (() => {
+                    const rawGroupWidth =
+                      chartWidth / Math.max(labels.length, 1)
+                    const maxGroupWidth = 80
+                    const groupWidth = Math.min(rawGroupWidth, maxGroupWidth)
+                    const totalBarsWidth = groupWidth * labels.length
+                    const barOffset = (chartWidth - totalBarsWidth) / 2
+                    const barWidth = Math.min(
+                      Math.max(
+                        (groupWidth * 0.72) / Math.max(series.length, 1),
+                        8
+                      ),
+                      48
+                    )
+                    return { groupWidth, barOffset, barWidth }
+                  })()
+                : null
+            return (
+              <svg
+                className="min-w-[360px]"
+                viewBox={`0 0 ${chartWidth + axisLeft + 12} ${chartHeight + axisTop + axisLabelHeight}`}
+                role="img"
+                aria-label={payload.title || '问数图表'}
+              >
                 <line
                   x1={axisLeft}
-                  y1={axisTop + chartHeight * (1 - ratio)}
+                  y1={axisTop}
+                  x2={axisLeft}
+                  y2={chartHeight + axisTop}
+                  stroke="#e5e7eb"
+                />
+                <line
+                  x1={axisLeft}
+                  y1={chartHeight + axisTop}
                   x2={chartWidth + axisLeft}
-                  y2={axisTop + chartHeight * (1 - ratio)}
-                  stroke="#f3f4f6"
-                  strokeDasharray="4 3"
+                  y2={chartHeight + axisTop}
+                  stroke="#e5e7eb"
                 />
                 <text
                   x={axisLeft - 8}
-                  y={axisTop + chartHeight * (1 - ratio) + 3}
+                  y={chartHeight + axisTop + 3}
                   textAnchor="end"
                   fontSize="10"
-                  fill="#d1d5db"
+                  fill="#9ca3af"
                 >
-                  {Math.round(max * ratio)}
+                  0
                 </text>
-              </g>
-            ))}
-            {series.map((item, seriesIndex) => {
-              const color = chartColors[seriesIndex % chartColors.length]
-              if (activeType === 'bar' && barLayout) {
-                const { groupWidth, barOffset, barWidth: clampedBarWidth } = barLayout
-                return item.data.map((value, index) => {
-                  const height =
-                    ((value - min) / (max - min || 1)) * chartHeight
-                  const x =
-                    axisLeft +
-                    barOffset +
-                    index * groupWidth +
-                    (groupWidth - clampedBarWidth * series.length) / 2 +
-                    seriesIndex * clampedBarWidth
-                  const y = axisTop + chartHeight - height
+                <text
+                  x={axisLeft - 8}
+                  y={axisTop + 4}
+                  textAnchor="end"
+                  fontSize="10"
+                  fill="#9ca3af"
+                >
+                  {max}
+                </text>
+                {[0.25, 0.5, 0.75].map(ratio => (
+                  <g key={ratio}>
+                    <line
+                      x1={axisLeft}
+                      y1={axisTop + chartHeight * (1 - ratio)}
+                      x2={chartWidth + axisLeft}
+                      y2={axisTop + chartHeight * (1 - ratio)}
+                      stroke="#f3f4f6"
+                      strokeDasharray="4 3"
+                    />
+                    <text
+                      x={axisLeft - 8}
+                      y={axisTop + chartHeight * (1 - ratio) + 3}
+                      textAnchor="end"
+                      fontSize="10"
+                      fill="#d1d5db"
+                    >
+                      {Math.round(max * ratio)}
+                    </text>
+                  </g>
+                ))}
+                {series.map((item, seriesIndex) => {
+                  const color = chartColors[seriesIndex % chartColors.length]
+                  if (activeType === 'bar' && barLayout) {
+                    const {
+                      groupWidth,
+                      barOffset,
+                      barWidth: clampedBarWidth
+                    } = barLayout
+                    return item.data.map((value, index) => {
+                      const height =
+                        ((value - min) / (max - min || 1)) * chartHeight
+                      const x =
+                        axisLeft +
+                        barOffset +
+                        index * groupWidth +
+                        (groupWidth - clampedBarWidth * series.length) / 2 +
+                        seriesIndex * clampedBarWidth
+                      const y = axisTop + chartHeight - height
+                      return (
+                        <g key={`${seriesIndex}-${index}`}>
+                          <rect
+                            x={x}
+                            y={y}
+                            width={clampedBarWidth}
+                            height={height}
+                            rx="6"
+                            fill={color}
+                            opacity={0.88}
+                          />
+                          <text
+                            x={x + clampedBarWidth / 2}
+                            y={y - 5}
+                            textAnchor="middle"
+                            fontSize="10"
+                            fontWeight="600"
+                            fill="#374151"
+                          >
+                            {value}
+                          </text>
+                        </g>
+                      )
+                    })
+                  }
+
+                  const lineLayout = (() => {
+                    const rawGroupWidth =
+                      chartWidth / Math.max(item.data.length, 1)
+                    const maxGroupWidth = 80
+                    const groupWidth = Math.min(rawGroupWidth, maxGroupWidth)
+                    const totalWidth = groupWidth * item.data.length
+                    const offsetX = (chartWidth - totalWidth) / 2
+                    return { groupWidth, offsetX }
+                  })()
+                  const path = buildLinePath(
+                    item.data,
+                    chartWidth,
+                    chartHeight,
+                    min,
+                    max,
+                    lineLayout.offsetX,
+                    lineLayout.groupWidth
+                  )
                   return (
-                    <g key={`${seriesIndex}-${index}`}>
-                      <rect
-                        x={x}
-                        y={y}
-                        width={clampedBarWidth}
-                        height={height}
-                        rx="6"
-                        fill={color}
-                        opacity={0.88}
+                    <g
+                      key={seriesIndex}
+                      transform={`translate(${axisLeft} ${axisTop})`}
+                    >
+                      <path
+                        d={path}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth="3"
                       />
-                      <text
-                        x={x + clampedBarWidth / 2}
-                        y={y - 5}
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="600"
-                        fill="#374151"
-                      >
-                        {value}
-                      </text>
+                      {item.data.map((value, index) => {
+                        const span = max - min || 1
+                        const x =
+                          item.data.length === 1
+                            ? chartWidth / 2
+                            : lineLayout.offsetX +
+                              index * lineLayout.groupWidth +
+                              lineLayout.groupWidth / 2
+                        const y =
+                          chartHeight - ((value - min) / span) * chartHeight
+                        return (
+                          <g key={index}>
+                            <circle cx={x} cy={y} r="3.5" fill={color} />
+                            <text
+                              x={x}
+                              y={Math.max(10, y - 8)}
+                              textAnchor="middle"
+                              fontSize="10"
+                              fontWeight="600"
+                              fill="#374151"
+                            >
+                              {value}
+                            </text>
+                          </g>
+                        )
+                      })}
                     </g>
                   )
-                })
-              }
-
-              const lineLayout = (() => {
-                const rawGroupWidth = chartWidth / Math.max(item.data.length, 1)
-                const maxGroupWidth = 80
-                const groupWidth = Math.min(rawGroupWidth, maxGroupWidth)
-                const totalWidth = groupWidth * item.data.length
-                const offsetX = (chartWidth - totalWidth) / 2
-                return { groupWidth, offsetX }
-              })()
-              const path = buildLinePath(
-                item.data,
-                chartWidth,
-                chartHeight,
-                min,
-                max,
-                lineLayout.offsetX,
-                lineLayout.groupWidth
-              )
-              return (
-                <g
-                  key={seriesIndex}
-                  transform={`translate(${axisLeft} ${axisTop})`}
-                >
-                  <path d={path} fill="none" stroke={color} strokeWidth="3" />
-                  {item.data.map((value, index) => {
-                    const span = max - min || 1
-                    const x = item.data.length === 1
-                      ? chartWidth / 2
-                      : lineLayout.offsetX + index * lineLayout.groupWidth + lineLayout.groupWidth / 2
-                    const y = chartHeight - ((value - min) / span) * chartHeight
-                    return (
-                      <g key={index}>
-                        <circle cx={x} cy={y} r="3.5" fill={color} />
-                        <text
+                })}
+                {labels.map((label, index) => {
+                  const x =
+                    activeType === 'bar' && barLayout
+                      ? axisLeft +
+                        barLayout.barOffset +
+                        index * barLayout.groupWidth +
+                        barLayout.groupWidth / 2
+                      : (() => {
+                          const rawGW = chartWidth / Math.max(labels.length, 1)
+                          const maxGW = 80
+                          const gw = Math.min(rawGW, maxGW)
+                          const tw = gw * labels.length
+                          const ox = (chartWidth - tw) / 2
+                          return axisLeft + ox + index * gw + gw / 2
+                        })()
+                  const y = chartHeight + axisTop + 22
+                  const cleanLabel = label
+                    .replace(/[（(][\s\S]*?[）)]$/, '')
+                    .trim()
+                  const lines = splitChartLabel(cleanLabel)
+                  return (
+                    <text
+                      key={label}
+                      x={x}
+                      y={y}
+                      textAnchor="middle"
+                      fontSize="10"
+                      fill="#6b7280"
+                    >
+                      <title>{label}</title>
+                      {lines.map((line, lineIndex) => (
+                        <tspan
+                          key={lineIndex}
                           x={x}
-                          y={Math.max(10, y - 8)}
-                          textAnchor="middle"
-                          fontSize="10"
-                          fontWeight="600"
-                          fill="#374151"
+                          dy={lineIndex === 0 ? 0 : 13}
                         >
-                          {value}
-                        </text>
-                      </g>
-                    )
-                  })}
-                </g>
-              )
-            })}
-            {labels.map((label, index) => {
-              const x = activeType === 'bar' && barLayout
-                ? axisLeft + barLayout.barOffset + index * barLayout.groupWidth + barLayout.groupWidth / 2
-                : (() => {
-                    const rawGW = chartWidth / Math.max(labels.length, 1)
-                    const maxGW = 80
-                    const gw = Math.min(rawGW, maxGW)
-                    const tw = gw * labels.length
-                    const ox = (chartWidth - tw) / 2
-                    return axisLeft + ox + index * gw + gw / 2
-                  })()
-              const y = chartHeight + axisTop + 22
-              const cleanLabel = label.replace(/[（(][\s\S]*?[）)]$/, '').trim()
-              const lines = splitChartLabel(cleanLabel)
-              return (
-                <text
-                  key={label}
-                  x={x}
-                  y={y}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="#6b7280"
-                >
-                  <title>{label}</title>
-                  {lines.map((line, lineIndex) => (
-                    <tspan key={lineIndex} x={x} dy={lineIndex === 0 ? 0 : 13}>
-                      {line}
-                    </tspan>
-                  ))}
-                </text>
-              )
-            })}
-          </svg>)
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  )
+                })}
+              </svg>
+            )
           })()}
         </div>
       ) : null}
@@ -1442,7 +1528,9 @@ function AnalysisDetails({
   items?: string[]
   children: React.ReactNode
 }) {
-  const [expanded, setExpanded] = useState(collapsedDefault !== false ? false : true)
+  const [expanded, setExpanded] = useState(
+    collapsedDefault !== false ? false : true
+  )
   const Icon = expanded ? ChevronUp : ChevronDown
   const isInsight = title.includes('洞察')
   const borderColor = isInsight ? 'border-[#d4e0f7]' : 'border-[#cfe8b8]'
@@ -1468,7 +1556,10 @@ function AnalysisDetails({
           {items && items.length > 0 ? (
             <ul className="space-y-1.5">
               {items.map((item, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-[#374151]">
+                <li
+                  key={i}
+                  className="flex items-start gap-2 text-sm text-[#374151]"
+                >
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-40" />
                   <span>{item}</span>
                 </li>
@@ -1492,7 +1583,12 @@ function extractTablesFromThinking(frames?: ThinkingFrame[]): string[] {
     if (fromMatches) {
       for (const m of fromMatches) {
         const name = m.replace(/\bFROM\s+`?/i, '').replace(/`$/, '')
-        if (name && !/select|where|and|or|group|order|having|limit|join|on|set|into|values/i.test(name)) {
+        if (
+          name &&
+          !/select|where|and|or|group|order|having|limit|join|on|set|into|values/i.test(
+            name
+          )
+        ) {
           tables.add(name)
         }
       }
@@ -1517,12 +1613,18 @@ function ThinkingProcess({ frames }: { frames: ThinkingFrame[] }) {
         onClick={() => setOpen(v => !v)}
         className="inline-flex items-center gap-1 text-[14px] font-semibold text-[#ff6b2b]"
       >
-        查看思考过程 <ChevronDown className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />
+        查看思考过程{' '}
+        <ChevronDown
+          className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`}
+        />
       </button>
       {open ? (
         <div className="mt-2 space-y-2 border-t border-[#eeeeee] pt-2">
           {frames.map((frame, i) => (
-            <div key={i} className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm text-[#64748b]">
+            <div
+              key={i}
+              className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm text-[#64748b]"
+            >
               <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
                 {frame.content}
               </pre>
@@ -1615,9 +1717,12 @@ function AssistantContent({
       <div className="space-y-3">
         {orderedSections.map((section, index) => {
           if (section.kind === 'analysis' || section.kind === 'insight') {
-            const metaItems = section.kind === 'insight' ? insightMeta?.keyPoints
-              : section.title.includes('建议') ? insightMeta?.suggestions
-              : insightMeta?.impacts
+            const metaItems =
+              section.kind === 'insight'
+                ? insightMeta?.keyPoints
+                : section.title.includes('建议')
+                  ? insightMeta?.suggestions
+                  : insightMeta?.impacts
             return (
               <AnalysisDetails
                 key={`${section.kind}-${index}`}
@@ -1674,7 +1779,9 @@ function AssistantContent({
         })}
         {elapsedMs != null && (
           <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
-            <span>数据来源：{tables ? tables.split(",").join("、") : '数据表'}</span>
+            <span>
+              数据来源：{tables ? tables.split(',').join('、') : '数据表'}
+            </span>
             <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
           </div>
         )}
@@ -1705,7 +1812,9 @@ function AssistantContent({
       })}
       {elapsedMs != null && (
         <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
-          <span>数据来源：{tables ? tables.split(",").join("、") : '数据表'}</span>
+          <span>
+            数据来源：{tables ? tables.split(',').join('、') : '数据表'}
+          </span>
           <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
         </div>
       )}
@@ -1960,7 +2069,9 @@ async function answerTrafficAggregateQuestion(
     params.set('holiday', 'true')
   }
 
-  const response = await fetch(`/api/chatdb/traffic/aggregate?${params}`, { credentials: 'include' })
+  const response = await fetch(`/api/chatdb/traffic/aggregate?${params}`, {
+    credentials: 'include'
+  })
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error(payload?.message || '车流统计查询失败')
@@ -2263,10 +2374,13 @@ export function AskNumberChat({
         // Chat requests can still create a session via the backend's auto-create,
         // but the user should be aware of the initialization failure.
         if (active) {
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: '会话初始化失败，部分功能可能受限。请尝试刷新页面。'
-          }])
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: '会话初始化失败，部分功能可能受限。请尝试刷新页面。'
+            }
+          ])
         }
       }
     }
@@ -2281,7 +2395,9 @@ export function AskNumberChat({
     if (topic !== 'traffic') return
     setTrafficStatusLoading(true)
     try {
-      const response = await fetch('/api/chatdb/traffic/ingest/status', { credentials: 'include' })
+      const response = await fetch('/api/chatdb/traffic/ingest/status', {
+        credentials: 'include'
+      })
       const payload = await response.json().catch(() => null)
       const data = unwrapChatDbData<TrafficIngestStatus>(payload)
       if (response.ok && data) {
@@ -2402,8 +2518,13 @@ export function AskNumberChat({
       }
 
       await readSSEStream(response.body, event => {
-        if (event.event === 'start' && typeof (event.data as Record<string, unknown>)?.sessionId === 'string') {
-          setSessionId((event.data as Record<string, unknown>).sessionId as string)
+        if (
+          event.event === 'start' &&
+          typeof (event.data as Record<string, unknown>)?.sessionId === 'string'
+        ) {
+          setSessionId(
+            (event.data as Record<string, unknown>).sessionId as string
+          )
         }
         if (event.event === 'fast_path') {
           setMessages(prev => {
@@ -2414,10 +2535,20 @@ export function AskNumberChat({
                 ...last,
                 metadata: {
                   fastPath: (event.fastPath as boolean) ?? true,
-                  format: (event.format ?? (event.data as Record<string, unknown>)?.format) as FastPathFormat | undefined,
-                  insightMeta: (((event.data as Record<string, unknown>)?.format ?? (event.format as Record<string, unknown>)) as Record<string, unknown> | undefined)?.insightMeta as Record<string, unknown> | undefined,
-                  allDates: ((event.data as Record<string, unknown>)?.allDates ?? event.allDates) as boolean | undefined,
-                  hybrid: ((event.data as Record<string, unknown>)?.hybrid ?? event.hybrid) as boolean | undefined
+                  format: (event.format ??
+                    (event.data as Record<string, unknown>)?.format) as
+                    | FastPathFormat
+                    | undefined,
+                  insightMeta: (
+                    ((event.data as Record<string, unknown>)?.format ??
+                      (event.format as Record<string, unknown>)) as
+                      | Record<string, unknown>
+                      | undefined
+                  )?.insightMeta as Record<string, unknown> | undefined,
+                  allDates: ((event.data as Record<string, unknown>)
+                    ?.allDates ?? event.allDates) as boolean | undefined,
+                  hybrid: ((event.data as Record<string, unknown>)?.hybrid ??
+                    event.hybrid) as boolean | undefined
                 }
               }
             }
@@ -2429,7 +2560,10 @@ export function AskNumberChat({
             const next = [...prev]
             const last = next[next.length - 1]
             if (last?.role === 'assistant') {
-              const frames = [...(last.thinkingFrames || []), { content: event.content!, timestamp: Date.now() }]
+              const frames = [
+                ...(last.thinkingFrames || []),
+                { content: event.content!, timestamp: Date.now() }
+              ]
               next[next.length - 1] = { ...last, thinkingFrames: frames }
             }
             return next
@@ -2440,7 +2574,10 @@ export function AskNumberChat({
             const next = [...prev]
             const last = next[next.length - 1]
             if (last?.role === 'assistant') {
-              next[next.length - 1] = { ...last, content: last.content + event.content }
+              next[next.length - 1] = {
+                ...last,
+                content: last.content + event.content
+              }
             }
             return next
           })
@@ -2450,18 +2587,31 @@ export function AskNumberChat({
             const next = [...prev]
             const last = next[next.length - 1]
             if (last?.role === 'assistant') {
-              next[next.length - 1] = { ...last, metadata: { ...last.metadata, tables: event.content } }
+              next[next.length - 1] = {
+                ...last,
+                metadata: { ...last.metadata, tables: event.content }
+              }
             }
             return next
           })
         }
-        if (event.event === 'error' && (event.data as Record<string, unknown>)?.message as string | undefined) {
+        if (
+          event.event === 'error' &&
+          ((event.data as Record<string, unknown>)?.message as
+            | string
+            | undefined)
+        ) {
           const msg = (event.data as Record<string, unknown>).message as string
           setMessages(prev => {
             const next = [...prev]
             const last = next[next.length - 1]
             if (last?.role === 'assistant') {
-              next[next.length - 1] = { ...last, content: last.content ? last.content + '\n\n⚠ ' + msg : '⚠ ' + msg }
+              next[next.length - 1] = {
+                ...last,
+                content: last.content
+                  ? last.content + '\n\n⚠ ' + msg
+                  : '⚠ ' + msg
+              }
             }
             return next
           })
@@ -2475,8 +2625,7 @@ export function AskNumberChat({
           if (last?.role === 'assistant' && !last.content) {
             next[next.length - 1] = {
               role: 'assistant',
-              content:
-                '问数服务暂时不可用，请稍后重试或联系管理员。'
+              content: '问数服务暂时不可用，请稍后重试或联系管理员。'
             }
           }
           return next
@@ -2493,7 +2642,10 @@ export function AskNumberChat({
         if (last?.role === 'assistant' && last.metadata?.startTime) {
           next[next.length - 1] = {
             ...last,
-            metadata: { ...last.metadata, elapsedMs: Date.now() - last.metadata.startTime }
+            metadata: {
+              ...last.metadata,
+              elapsedMs: Date.now() - last.metadata.startTime
+            }
           }
         }
         return next
@@ -2606,8 +2758,14 @@ export function AskNumberChat({
         }
 
         await readSSEStream(response.body, event => {
-          if (event.event === 'start' && typeof (event.data as Record<string, unknown>)?.sessionId === 'string') {
-            setSessionId((event.data as Record<string, unknown>).sessionId as string)
+          if (
+            event.event === 'start' &&
+            typeof (event.data as Record<string, unknown>)?.sessionId ===
+              'string'
+          ) {
+            setSessionId(
+              (event.data as Record<string, unknown>).sessionId as string
+            )
           }
           if (event.event === 'message' && event.content) {
             setMessages(prev =>
@@ -2638,7 +2796,6 @@ export function AskNumberChat({
 
       return
     }
-
   }
 
   const copyAnswer = async (content: string) => {
@@ -2729,16 +2886,21 @@ export function AskNumberChat({
               </p>
               {topic === 'traffic' || suggestedQuestions.length > 0 ? (
                 <div className="mx-auto mt-6 flex max-w-[420px] flex-wrap justify-center gap-2">
-                  {(suggestedQuestions.length > 0 ? suggestedQuestions : trafficRecommendedQuestions).slice(0, 5).map(question => (
-                    <button
-                      key={question}
-                      type="button"
-                      onClick={() => submit(question)}
-                      className="rounded-full border border-[#dbe7ff] bg-[#f8fbff] px-3 py-1.5 text-xs text-[#2563eb]"
-                    >
-                      {question}
-                    </button>
-                  ))}
+                  {(suggestedQuestions.length > 0
+                    ? suggestedQuestions
+                    : trafficRecommendedQuestions
+                  )
+                    .slice(0, 5)
+                    .map(question => (
+                      <button
+                        key={question}
+                        type="button"
+                        onClick={() => submit(question)}
+                        className="rounded-full border border-[#dbe7ff] bg-[#f8fbff] px-3 py-1.5 text-xs text-[#2563eb]"
+                      >
+                        {question}
+                      </button>
+                    ))}
                 </div>
               ) : null}
             </div>
@@ -2755,14 +2917,17 @@ export function AskNumberChat({
                 >
                   {message.role === 'assistant' ? (
                     <>
-                      {message.thinkingFrames && message.thinkingFrames.length > 0 ? (
+                      {message.thinkingFrames &&
+                      message.thinkingFrames.length > 0 ? (
                         <ThinkingProcess frames={message.thinkingFrames} />
                       ) : null}
                       {message.content ? (
                         <AssistantContent
                           content={message.content}
                           insightMeta={message.metadata?.insightMeta}
-                          insightCollapsedDefault={message.metadata?.format?.insightCollapsedDefault}
+                          insightCollapsedDefault={
+                            message.metadata?.format?.insightCollapsedDefault
+                          }
                           onClarify={option => submit(option)}
                           trafficFilters={
                             topic === 'traffic' ? trafficFilters : undefined
@@ -2773,7 +2938,12 @@ export function AskNumberChat({
                               : undefined
                           }
                           allDates={message.metadata?.allDates}
-                          userQuestion={messages.slice(0, index).reverse().find(m => m.role === 'user')?.content}
+                          userQuestion={
+                            messages
+                              .slice(0, index)
+                              .reverse()
+                              .find(m => m.role === 'user')?.content
+                          }
                           elapsedMs={message.metadata?.elapsedMs}
                           topic={topic}
                           thinkingFrames={message.thinkingFrames}

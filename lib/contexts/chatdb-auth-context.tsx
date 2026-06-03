@@ -88,10 +88,6 @@ export function ChatDbAuthProvider({
    */
   const validateSession = useCallback(async (mode: ChatDbAuthMode) => {
     try {
-      // admin 和 user 使用不同的验证接口：
-      // - admin: 调 /api/chatdb/admin/profile（tokenSource='admin'，读 chatdb_admin_token cookie）
-      // - user: 调 /api/chatdb/permissions（tokenSource='user'，读 chatdb_token cookie）
-      // 两者不能混用，因为 httpOnly cookie 的 path 不同，浏览器只在匹配路径下发送
       const validatePath =
         mode === 'admin'
           ? '/api/chatdb/admin/profile'
@@ -102,10 +98,20 @@ export function ChatDbAuthProvider({
       })
       const payload = await response.json().catch(() => null)
       const data = payload?.data || payload
-      if (data?.authenticated || data?.username) {
+      // admin/profile: returns { username, role } → check data.username
+      // user/permissions: returns { permissions, qaPermissions } → check code === 0 and data exists
+      const isValid =
+        data?.authenticated ||
+        data?.username ||
+        (payload?.code === 0 &&
+          data &&
+          (data.permissions ||
+            data.qaPermissions ||
+            data.ruleLevel !== undefined))
+      if (isValid) {
         if (mode === 'user') setUserAuthenticated(true)
         if (mode === 'admin') setAdminAuthenticated(true)
-        if (data.username) {
+        if (data?.username) {
           if (mode === 'admin') setAdminUsername(data.username)
           else setUsername(data.username)
         }
@@ -117,7 +123,7 @@ export function ChatDbAuthProvider({
         }
         if (mode === 'admin') {
           setAdminAuthenticated(false)
-          deleteCookie('chatdb_auth_status', '/admin')
+          deleteCookie('chatdb_auth_status')
         }
       }
     } catch {
@@ -141,12 +147,17 @@ export function ChatDbAuthProvider({
       if (storedAdminName) setAdminUsername(storedAdminName)
 
       // 3. 根据 cookie 状态决定是否需要异步校验
-      if (authStatus === 'admin') {
-        // admin 模式安全要求高，每次挂载都校验
+      if (authStatus === 'both') {
+        setAdminAuthenticated(true)
+        setUserAuthenticated(true)
+        Promise.all([
+          validateSession('admin'),
+          validateSession('user')
+        ]).finally(() => setInitialLoading(false))
+      } else if (authStatus === 'admin') {
         setAdminAuthenticated(true)
         validateSession('admin').finally(() => setInitialLoading(false))
       } else if (authStatus === 'user') {
-        // user 模式：如果 5 分钟内校验过就跳过，减少后端压力
         setUserAuthenticated(true)
         const now = Date.now()
         if (now - lastValidatedRef.current > 5 * 60 * 1000) {
@@ -170,7 +181,10 @@ export function ChatDbAuthProvider({
     intervalRef.current = setInterval(
       () => {
         const authStatus = getCookie('chatdb_auth_status')
-        if (authStatus === 'admin') {
+        if (authStatus === 'both') {
+          validateSession('admin')
+          validateSession('user')
+        } else if (authStatus === 'admin') {
           validateSession('admin')
         } else if (authStatus === 'user') {
           const now = Date.now()
@@ -178,7 +192,6 @@ export function ChatDbAuthProvider({
             validateSession('user')
           }
         } else {
-          // cookie 已失效（被清除或过期），同步清除前端状态
           setUserAuthenticated(false)
           setAdminAuthenticated(false)
         }
@@ -216,13 +229,20 @@ export function ChatDbAuthProvider({
           throw new Error(payload?.message || '登录失败，请检查账号和密码')
         }
         // 写非 httpOnly cookie，让客户端下次刷新时能立即读取状态
-        document.cookie = `chatdb_auth_status=${mode}; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
+        // 组合格式：如果双方都已认证则为 "both"
+        const currentAuthStatus = getCookie('chatdb_auth_status')
+        let newAuthStatus: string = mode
+        if (currentAuthStatus === 'user' && mode === 'admin') {
+          newAuthStatus = 'both'
+        } else if (currentAuthStatus === 'admin' && mode === 'user') {
+          newAuthStatus = 'both'
+        }
+        document.cookie = `chatdb_auth_status=${newAuthStatus}; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
         const name = payload?.data?.username || user
         if (mode === 'admin') {
           setAdminUsername(name)
           setAdminAuthenticated(true)
           window.localStorage.setItem('chatdb_admin_name', name)
-          // 清除旧的 localStorage key（兼容过渡期）
           window.localStorage.removeItem('chatdb_admin_login')
           await validateSession('admin')
         } else {
@@ -255,16 +275,25 @@ export function ChatDbAuthProvider({
     if (mode === 'user') {
       setUserAuthenticated(false)
       setUsername(null)
-      deleteCookie('chatdb_auth_status')
       window.localStorage.removeItem('chatdb_user_login')
       window.localStorage.removeItem('chatdb_user_name')
     } else {
       setAdminAuthenticated(false)
       setAdminUsername(null)
-      // 注意 path=/admin，与 chatdb_admin_token cookie 的 path 一致
-      deleteCookie('chatdb_auth_status', '/admin')
       window.localStorage.removeItem('chatdb_admin_login')
       window.localStorage.removeItem('chatdb_admin_name')
+    }
+    // 更新 cookie 为剩余认证状态
+    const remainingUser = mode !== 'user' && userAuthenticated
+    const remainingAdmin = mode !== 'admin' && adminAuthenticated
+    if (remainingUser && remainingAdmin) {
+      document.cookie = `chatdb_auth_status=both; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
+    } else if (remainingAdmin) {
+      document.cookie = `chatdb_auth_status=admin; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
+    } else if (remainingUser) {
+      document.cookie = `chatdb_auth_status=user; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`
+    } else {
+      deleteCookie('chatdb_auth_status')
     }
   }, [])
 

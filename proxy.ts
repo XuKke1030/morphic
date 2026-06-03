@@ -77,23 +77,18 @@ export async function proxy(request: NextRequest) {
   const userToken = request.cookies.get('chatdb_token')?.value
   const adminToken = request.cookies.get('chatdb_admin_token')?.value
 
-  // 根据路径和 token 存在情况，判断当前认证状态
+  // 根据 token 存在情况判断认证状态（不再依赖当前路径）
+  // 使用组合格式 "user", "admin", "both", "none" 同时传递双方认证状态
   let authStatus = 'none'
-  if (adminPaths.some(p => pathname.startsWith(p)) && adminToken) {
-    // 访问 /admin 且有 admin token → admin
+  if (adminToken && userToken) {
+    authStatus = 'both'
+  } else if (adminToken) {
     authStatus = 'admin'
-  } else if (
-    chatdbProtectedPaths.some(
-      p => pathname === p || pathname.startsWith(p + '/')
-    ) &&
-    userToken
-  ) {
-    // 访问 /ask、/qa 且有 user token → user
+  } else if (userToken) {
     authStatus = 'user'
   }
 
   // 写入非 httpOnly cookie，供客户端 AuthContext 立即读取，避免首次渲染闪烁
-  // 值为 'none' | 'user' | 'admin'
   response.cookies.set('chatdb_auth_status', authStatus, {
     httpOnly: false,
     sameSite: 'lax',
