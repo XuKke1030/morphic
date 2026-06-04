@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 
+import { useVisualViewport } from '@/hooks/use-visual-viewport'
+
 import { math } from '@streamdown/math'
 import {
   Activity,
@@ -2256,6 +2258,7 @@ export function AskNumberChat({
   initialQuestion?: string
   initialTopic: string
 }) {
+  const { height: vvHeight } = useVisualViewport()
   const [topic] = useState(initialTopic)
   const [input, setInput] = useState(() => {
     if (typeof window === 'undefined') return ''
@@ -2841,9 +2844,12 @@ export function AskNumberChat({
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#f7f7f7] text-[#111827]">
+    <div
+      className="flex h-dvh w-full flex-col bg-[#f7f7f7] text-[#111827]"
+      style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
+    >
       <div className="mx-auto flex h-full w-full max-w-[560px] flex-col bg-white">
-        <header className="flex h-[72px] shrink-0 items-center gap-4 border-b border-[#eeeeee] px-5">
+        <header className="flex h-auto min-h-[48px] shrink-0 items-center gap-3 border-b border-[#eeeeee] px-4 py-2.5">
           <Link
             href="/"
             className="flex h-10 w-10 items-center justify-center rounded-full border border-[#e5e5e5]"
@@ -2874,7 +2880,7 @@ export function AskNumberChat({
         <main className="min-h-0 flex-1 overflow-y-scroll px-5 py-6 [scrollbar-gutter:stable]">
           {messages.length === 0 ? (
             <div className="mt-20 text-center">
-              <h2 className="text-3xl font-extrabold tracking-normal">
+              <h2 className="text-2xl font-extrabold tracking-normal">
                 请输入想了解的{topicLabel}问题
               </h2>
               <p className="mt-4 text-[#8b8f99]">
@@ -2990,6 +2996,9 @@ export function AskNumberChat({
           onChange={setInput}
           onSubmit={submit}
           onStop={stop}
+          onFocus={() =>
+            bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+          }
         />
       </div>
     </div>

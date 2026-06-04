@@ -4,6 +4,8 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
 
 import { Mic, MicOff, Send, Square } from 'lucide-react'
 
+import { VoiceWaveform } from './voice-waveform'
+
 type AudioWindow = Window & {
   webkitAudioContext?: typeof AudioContext
 }
@@ -18,6 +20,7 @@ type QuestionInputBarProps = {
   onChange: (value: string) => void
   onSubmit: (question?: string) => void
   onStop: () => void
+  onFocus?: () => void
 }
 
 const DEFAULT_SILENCE_TIMEOUT_MS = 3000
@@ -51,11 +54,13 @@ export function QuestionInputBar({
   topic = '',
   onChange,
   onSubmit,
-  onStop
+  onStop,
+  onFocus
 }: QuestionInputBarProps) {
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
   const [voiceError, setVoiceError] = useState('')
+  const [recordDuration, setRecordDuration] = useState(0)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -66,6 +71,7 @@ export function QuestionInputBar({
   const silenceStartedAtRef = useRef<number | null>(null)
   const silenceTimerRef = useRef<number | null>(null)
   const maxTimerRef = useRef<number | null>(null)
+  const durationTimerRef = useRef<number | null>(null)
 
   const clearTimers = () => {
     if (silenceTimerRef.current !== null) {
@@ -80,6 +86,11 @@ export function QuestionInputBar({
 
   const cleanupAudio = () => {
     clearTimers()
+    if (durationTimerRef.current !== null) {
+      window.clearInterval(durationTimerRef.current)
+      durationTimerRef.current = null
+    }
+    setRecordDuration(0)
     streamRef.current?.getTracks().forEach(track => track.stop())
     streamRef.current = null
     void audioContextRef.current?.close().catch(() => undefined)
@@ -238,8 +249,13 @@ export function QuestionInputBar({
 
       recorder.start()
       setRecording(true)
+      setRecordDuration(0)
       watchSilence()
       maxTimerRef.current = window.setTimeout(stopRecording, MAX_RECORDING_MS)
+      durationTimerRef.current = window.setInterval(
+        () => setRecordDuration(d => d + 1),
+        1000
+      )
     } catch {
       cleanupAudio()
       setRecording(false)
@@ -290,9 +306,9 @@ export function QuestionInputBar({
   return (
     <form
       onSubmit={submit}
-      className="shrink-0 border-t border-[#eeeeee] bg-white p-4"
+      className="shrink-0 border-t border-[#eeeeee] bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="grid grid-cols-[44px_minmax(0,1fr)_52px_48px] items-center gap-3 rounded-2xl border border-[#e5e5e5] px-4 py-3">
+      <div className="grid grid-cols-[44px_minmax(0,1fr)_52px_48px] items-center gap-3 rounded-2xl border border-[#e5e5e5] px-4 py-3 mb-2">
         <button
           type="button"
           onClick={recording ? stopRecording : startRecording}
@@ -316,21 +332,30 @@ export function QuestionInputBar({
           )}
         </button>
 
-        <textarea
-          ref={textareaRef}
-          value={
-            recording ? '正在聆听...' : transcribing ? '正在转写...' : value
-          }
-          maxLength={maxLength}
-          disabled={disabled || voiceBusy}
-          onChange={event => onChange(event.target.value.slice(0, maxLength))}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          className="block h-[44px] max-h-[120px] w-full resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none placeholder:text-[#9ca3af] disabled:text-[#9ca3af]"
-        />
-        <span className="text-center text-xs tabular-nums text-[#999]">
-          {value.length}/{maxLength}
-        </span>
+        {recording ? (
+          <VoiceWaveform
+            analyser={analyserRef.current}
+            duration={recordDuration}
+            active={recording}
+          />
+        ) : (
+          <textarea
+            ref={textareaRef}
+            value={transcribing ? '正在转写...' : value}
+            maxLength={maxLength}
+            disabled={disabled || transcribing}
+            onChange={event => onChange(event.target.value.slice(0, maxLength))}
+            onKeyDown={handleKeyDown}
+            onFocus={onFocus}
+            placeholder={placeholder}
+            className="block h-[44px] max-h-[120px] w-full resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none placeholder:text-[#9ca3af] disabled:text-[#9ca3af]"
+          />
+        )}
+        {!recording && (
+          <span className="text-center text-xs tabular-nums text-[#999]">
+            {value.length}/{maxLength}
+          </span>
+        )}
         <button
           type="submit"
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#484848] text-white disabled:opacity-40"

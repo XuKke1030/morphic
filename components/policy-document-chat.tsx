@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { DocumentViewer } from './document-viewer'
 import { readSSEStream } from '@/lib/chatdb/sse'
+import { useVisualViewport } from '@/hooks/use-visual-viewport'
 
 import {
   ArrowLeft,
@@ -98,10 +99,15 @@ const storagePrefix = 'chatdb:qa-document-session'
 const documentQuestionMaxLength = 100
 
 function linkifyCitations(text: string): string {
-  return text.replace(/\[(\d+)\]/g, '<sup><a href="#" class="citation-marker" data-citation="$1">[$1]</a></sup>')
+  return text.replace(
+    /\[(\d+)\]/g,
+    '<sup><a href="#" class="citation-marker" data-citation="$1">[$1]</a></sup>'
+  )
 }
 
-function pickList<T>(payload: ApiEnvelope<{ list?: T[] }> | { list?: T[] } | null) {
+function pickList<T>(
+  payload: ApiEnvelope<{ list?: T[] }> | { list?: T[] } | null
+) {
   if (!payload) return []
   if ('data' in payload) return payload.data?.list || []
   return (payload as { list?: T[] }).list || []
@@ -198,23 +204,40 @@ function sessionIdFromFrame(frame: StreamFrame) {
   return asText(data?.sessionId)
 }
 
-function ConversationMessage({ message, onViewDocument, onClarify }: { message: Message; onViewDocument: (documentId: number, focusSegmentId?: number) => void; onClarify: (value: string) => void }) {
+function ConversationMessage({
+  message,
+  onViewDocument,
+  onClarify
+}: {
+  message: Message
+  onViewDocument: (documentId: number, focusSegmentId?: number) => void
+  onClarify: (value: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [citationsOpen, setCitationsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const processFrames = (message.frames || []).filter(
-    frame => frame.event && frame.event !== 'message' && frame.event !== 'citation'
-      && frame.event !== 'conclusion' && frame.event !== 'evidence'
-      && frame.event !== 'supplement' && frame.event !== 'suggestion'
-      && frame.event !== 'section_start'
-      && frame.event !== 'clarification'
+    frame =>
+      frame.event &&
+      frame.event !== 'message' &&
+      frame.event !== 'citation' &&
+      frame.event !== 'conclusion' &&
+      frame.event !== 'evidence' &&
+      frame.event !== 'supplement' &&
+      frame.event !== 'suggestion' &&
+      frame.event !== 'section_start' &&
+      frame.event !== 'clarification'
   )
-  const citations = (message.citations || []).slice().sort((a, b) => a.index - b.index)
+  const citations = (message.citations || [])
+    .slice()
+    .sort((a, b) => a.index - b.index)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement
-      const link = target.closest('a.citation-marker') as HTMLAnchorElement | null
+      const link = target.closest(
+        'a.citation-marker'
+      ) as HTMLAnchorElement | null
       if (!link) return
       e.preventDefault()
       const idx = Number(link.dataset.citation)
@@ -225,9 +248,10 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
   }, [])
 
   const handleCopy = () => {
-    const text = message.sections && message.sections.length > 0
-      ? message.sections.map(s => `【${s.title}】\n${s.content}`).join('\n\n')
-      : message.content
+    const text =
+      message.sections && message.sections.length > 0
+        ? message.sections.map(s => `【${s.title}】\n${s.content}`).join('\n\n')
+        : message.content
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
@@ -251,15 +275,23 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
           onClick={() => setOpen(value => !value)}
           className="mb-4 inline-flex items-center gap-1 text-[15px] font-semibold text-[#ff6b2b]"
         >
-          查看思考过程 <ChevronDown className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`} />
+          查看思考过程{' '}
+          <ChevronDown
+            className={`h-4 w-4 transition ${open ? 'rotate-180' : ''}`}
+          />
         </button>
       ) : null}
 
       {open ? (
         <div className="mb-4 space-y-3 border-t border-[#eeeeee] pt-3">
           {processFrames.map((frame, index) => (
-            <div key={index} className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm text-[#64748b]">
-              <div className="mb-1 font-semibold text-[#334155]">{frameTitle(frame)}</div>
+            <div
+              key={index}
+              className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm text-[#64748b]"
+            >
+              <div className="mb-1 font-semibold text-[#334155]">
+                {frameTitle(frame)}
+              </div>
               {formatFrame(frame) ? (
                 <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
                   {formatFrame(frame)}
@@ -273,21 +305,37 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
       <div className="space-y-4">
         {message.sections && message.sections.length > 0 ? (
           message.sections.map((section, i) => (
-            <div key={i} className={
-              section.kind === 'conclusion' ? 'rounded-xl border border-[#d4e0f7] bg-[#f5f8ff] px-4 py-3'
-              : section.kind === 'evidence' ? 'rounded-xl border border-[#cfe8b8] bg-[#f8fff2] px-4 py-3'
-              : section.kind === 'suggestion' ? 'rounded-xl border border-[#fde8d0] bg-[#fff9f2] px-4 py-3'
-              : 'rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-4 py-3'
-            }>
-              <div className="mb-2 text-[13px] font-semibold text-[#6b7280]">{section.title}</div>
+            <div
+              key={i}
+              className={
+                section.kind === 'conclusion'
+                  ? 'rounded-xl border border-[#d4e0f7] bg-[#f5f8ff] px-4 py-3'
+                  : section.kind === 'evidence'
+                    ? 'rounded-xl border border-[#cfe8b8] bg-[#f8fff2] px-4 py-3'
+                    : section.kind === 'suggestion'
+                      ? 'rounded-xl border border-[#fde8d0] bg-[#fff9f2] px-4 py-3'
+                      : 'rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-4 py-3'
+              }
+            >
+              <div className="mb-2 text-[13px] font-semibold text-[#6b7280]">
+                {section.title}
+              </div>
               <div className="prose prose-neutral max-w-none text-[15px] leading-7">
-                {section.content ? <Streamdown>{linkifyCitations(section.content)}</Streamdown> : '正在生成...'}
+                {section.content ? (
+                  <Streamdown>{linkifyCitations(section.content)}</Streamdown>
+                ) : (
+                  '正在生成...'
+                )}
               </div>
             </div>
           ))
         ) : (
           <div className="prose prose-neutral max-w-none text-[16px] leading-8">
-            {message.content ? <Streamdown>{linkifyCitations(message.content)}</Streamdown> : '正在查询...'}
+            {message.content ? (
+              <Streamdown>{linkifyCitations(message.content)}</Streamdown>
+            ) : (
+              '正在查询...'
+            )}
           </div>
         )}
 
@@ -308,7 +356,9 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
                 </button>
               ))}
             </div>
-            <div className="mt-2 text-xs text-[#9ca3af]">都不准确重新输入即可</div>
+            <div className="mt-2 text-xs text-[#9ca3af]">
+              都不准确重新输入即可
+            </div>
           </div>
         ) : null}
       </div>
@@ -322,7 +372,9 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
           >
             <FileText className="h-4 w-4" />
             参考资料({citations.length})
-            <ChevronDown className={`h-3.5 w-3.5 transition ${citationsOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition ${citationsOpen ? 'rotate-180' : ''}`}
+            />
           </button>
         ) : (
           <span />
@@ -332,7 +384,11 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
           onClick={handleCopy}
           className="inline-flex items-center gap-1 text-[14px] text-[#9ca3af] transition hover:text-[#374151]"
         >
-          {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+          {copied ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
         </button>
       </div>
 
@@ -342,31 +398,44 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
             <button
               key={citation.citationId}
               type="button"
-              onClick={() => onViewDocument(
-                citation.documentId,
-                citation.anchor?.split('-').pop() ? Number(citation.anchor!.split('-').pop()) : undefined
-              )}
+              onClick={() =>
+                onViewDocument(
+                  citation.documentId,
+                  citation.anchor?.split('-').pop()
+                    ? Number(citation.anchor!.split('-').pop())
+                    : undefined
+                )
+              }
               className="block w-full rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-3 py-3 text-left transition hover:border-[#cbd5e1] hover:bg-white"
             >
               <div className="flex items-center gap-2 text-[14px] font-semibold text-[#374151]">
                 <FileText className="h-4 w-4 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">
-                  [{citation.index}] {citation.documentTitle || citation.fileName || '引用文档'}
+                  [{citation.index}]{' '}
+                  {citation.documentTitle || citation.fileName || '引用文档'}
                 </span>
                 {citation.repealedBy ? (
-                  <span className="shrink-0 rounded-full bg-[#fef2f2] px-2 py-0.5 text-[11px] font-medium text-[#dc2626]">已废止</span>
+                  <span className="shrink-0 rounded-full bg-[#fef2f2] px-2 py-0.5 text-[11px] font-medium text-[#dc2626]">
+                    已废止
+                  </span>
                 ) : citation.effectiveDate ? (
-                  <span className="shrink-0 rounded-full bg-[#f0fdf4] px-2 py-0.5 text-[11px] font-medium text-[#16a34a]">生效 {citation.effectiveDate}</span>
+                  <span className="shrink-0 rounded-full bg-[#f0fdf4] px-2 py-0.5 text-[11px] font-medium text-[#16a34a]">
+                    生效 {citation.effectiveDate}
+                  </span>
                 ) : null}
                 {citation.page ? (
-                  <span className="shrink-0 text-[12px] text-[#9ca3af]">第 {citation.page} 页</span>
+                  <span className="shrink-0 text-[12px] text-[#9ca3af]">
+                    第 {citation.page} 页
+                  </span>
                 ) : null}
               </div>
               <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-[#6b7280]">
                 {citation.content}
               </p>
               {citation.repealedBy ? (
-                <p className="mt-1 text-[11px] text-[#dc2626]">被「{citation.repealedBy}」废止</p>
+                <p className="mt-1 text-[11px] text-[#dc2626]">
+                  被「{citation.repealedBy}」废止
+                </p>
               ) : null}
             </button>
           ))}
@@ -377,6 +446,7 @@ function ConversationMessage({ message, onViewDocument, onClarify }: { message: 
 }
 
 export function PolicyDocumentChat() {
+  const { height: vvHeight } = useVisualViewport()
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [knowledgeCode, setKnowledgeCode] = useState('')
   const [questions, setQuestions] = useState<PopularQuestion[]>([])
@@ -390,7 +460,10 @@ export function PolicyDocumentChat() {
   const [deepThinking, setDeepThinking] = useState(false)
   const [webSearch, setWebSearch] = useState(false)
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false)
-  const [viewerDoc, setViewerDoc] = useState<{ documentId: number; focusSegmentId?: number } | null>(null)
+  const [viewerDoc, setViewerDoc] = useState<{
+    documentId: number
+    focusSegmentId?: number
+  } | null>(null)
   const [welcomeMessage, setWelcomeMessage] = useState('')
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -403,23 +476,24 @@ export function PolicyDocumentChat() {
     () => new Set(selectedKnowledgeCodes),
     [selectedKnowledgeCodes]
   )
-  const selectedKnowledgeLabel = useMemo(
-    () => {
-      if (!selectedKnowledgeCodes.length) return '请选择文档库'
-      if (selectedKnowledgeCodes.length === knowledgeBases.length) return '全部文档库'
-      const selectedNames = knowledgeBases
-        .filter(item => selectedKnowledgeSet.has(item.code))
-        .map(item => item.name)
-      if (selectedNames.length <= 1) return selectedNames[0] || '请选择文档库'
-      return `${selectedNames[0]}等${selectedNames.length}个库`
-    },
-    [knowledgeBases, selectedKnowledgeCodes, selectedKnowledgeSet]
-  )
+  const selectedKnowledgeLabel = useMemo(() => {
+    if (!selectedKnowledgeCodes.length) return '请选择文档库'
+    if (selectedKnowledgeCodes.length === knowledgeBases.length)
+      return '全部文档库'
+    const selectedNames = knowledgeBases
+      .filter(item => selectedKnowledgeSet.has(item.code))
+      .map(item => item.name)
+    if (selectedNames.length <= 1) return selectedNames[0] || '请选择文档库'
+    return `${selectedNames[0]}等${selectedNames.length}个库`
+  }, [knowledgeBases, selectedKnowledgeCodes, selectedKnowledgeSet])
   const currentKnowledge = useMemo(
     () => knowledgeBases.find(item => item.code === selectedKnowledgeCodes[0]),
     [knowledgeBases, selectedKnowledgeCodes]
   )
-  const title = selectedKnowledgeCodes.length > 1 ? '多文档库问答' : currentKnowledge?.name || '政策文档问答'
+  const title =
+    selectedKnowledgeCodes.length > 1
+      ? '多文档库问答'
+      : currentKnowledge?.name || '政策文档问答'
   const storageKey = `${storagePrefix}:${knowledgeCode || 'none'}`
 
   useEffect(() => {
@@ -432,7 +506,9 @@ export function PolicyDocumentChat() {
       controller.signal
     )
       .then(payload => {
-        const list = pickList<KnowledgeBase>(payload).filter((item: KnowledgeBase) => item.enabled)
+        const list = pickList<KnowledgeBase>(payload).filter(
+          (item: KnowledgeBase) => item.enabled
+        )
         setKnowledgeBases(list)
         setKnowledgeCode(current => {
           if (current) {
@@ -453,12 +529,16 @@ export function PolicyDocumentChat() {
       })
       .finally(() => setLoadingMeta(false))
 
-    fetchJson<ApiEnvelope<{ welcomeMessage?: string; welcomeSubtext?: string }>>(
-      '/api/chatdb/user/bootstrap',
-      controller.signal
-    )
+    fetchJson<
+      ApiEnvelope<{ welcomeMessage?: string; welcomeSubtext?: string }>
+    >('/api/chatdb/user/bootstrap', controller.signal)
       .then(payload => {
-        const d = payload?.data || payload as unknown as { welcomeMessage?: string; welcomeSubtext?: string }
+        const d =
+          payload?.data ||
+          (payload as unknown as {
+            welcomeMessage?: string
+            welcomeSubtext?: string
+          })
         if (d?.welcomeMessage) setWelcomeMessage(d.welcomeMessage)
       })
       .catch(() => {})
@@ -477,15 +557,18 @@ export function PolicyDocumentChat() {
       `/api/chatdb/popular-questions?knowledgeCode=${encodeURIComponent(knowledgeCode)}`,
       controller.signal
     )
-      .then(payload => setQuestions(pickList<PopularQuestion>(payload).slice(0, 3)))
+      .then(payload =>
+        setQuestions(pickList<PopularQuestion>(payload).slice(0, 3))
+      )
       .catch(() => setQuestions([]))
 
-    fetchJson<ApiEnvelope<{ list: { id: number; question: string; topic: string }[] }>>(
-      `/api/chatdb/example-questions`,
-      controller.signal
-    )
+    fetchJson<
+      ApiEnvelope<{ list: { id: number; question: string; topic: string }[] }>
+    >(`/api/chatdb/example-questions`, controller.signal)
       .then(payload => {
-        const list = pickList<{ id: number; question: string; topic: string }>(payload)
+        const list = pickList<{ id: number; question: string; topic: string }>(
+          payload
+        )
         setExampleQuestions(list.map(q => q.question).slice(0, 6))
       })
       .catch(() => setExampleQuestions([]))
@@ -567,10 +650,13 @@ export function PolicyDocumentChat() {
       window.localStorage.removeItem(storageKey)
     }
     if (activeSessionId) {
-      fetch(`/api/chatdb/qa/sessions/${encodeURIComponent(activeSessionId)}/reset`, {
-        method: 'POST',
-        credentials: 'include'
-      }).catch(() => undefined)
+      fetch(
+        `/api/chatdb/qa/sessions/${encodeURIComponent(activeSessionId)}/reset`,
+        {
+          method: 'POST',
+          credentials: 'include'
+        }
+      ).catch(() => undefined)
     }
   }
 
@@ -587,7 +673,10 @@ export function PolicyDocumentChat() {
     const context = messages
       .filter(message => message.content.trim())
       .slice(-10)
-      .map(message => ({ role: message.role, content: message.content.slice(0, 1600) }))
+      .map(message => ({
+        role: message.role,
+        content: message.content.slice(0, 1600)
+      }))
 
     setMessages(prev => [
       ...prev,
@@ -640,7 +729,9 @@ export function PolicyDocumentChat() {
             const kind = asText(data?.sectionKind) || asText(data?.kind) || ''
             if (sectionKindFromEvent[kind]) {
               currentSectionKind = sectionKindFromEvent[kind]
-              const existing = sections.findIndex(s => s.kind === currentSectionKind)
+              const existing = sections.findIndex(
+                s => s.kind === currentSectionKind
+              )
               if (existing >= 0) {
                 sections[existing] = { ...sections[existing], content: '' }
               } else {
@@ -651,7 +742,11 @@ export function PolicyDocumentChat() {
                 })
               }
             }
-          } else if (currentSectionKind && frame.event === 'message' && frame.content) {
+          } else if (
+            currentSectionKind &&
+            frame.event === 'message' &&
+            frame.content
+          ) {
             const idx = sections.findIndex(s => s.kind === currentSectionKind)
             if (idx >= 0) {
               sections[idx] = {
@@ -704,13 +799,18 @@ export function PolicyDocumentChat() {
       })
     } catch (submitError) {
       if ((submitError as Error).name !== 'AbortError') {
-        const message = submitError instanceof Error ? submitError.message : '问答请求失败'
+        const message =
+          submitError instanceof Error ? submitError.message : '问答请求失败'
         setError(message)
         setMessages(prev => {
           const next = [...prev]
           const last = next[next.length - 1]
           if (last?.role === 'assistant' && !last.content) {
-            next[next.length - 1] = { role: 'assistant', content: message, frames: [] }
+            next[next.length - 1] = {
+              role: 'assistant',
+              content: message,
+              frames: []
+            }
           }
           return next
         })
@@ -722,10 +822,12 @@ export function PolicyDocumentChat() {
   }
 
   return (
-    <div className="h-full w-full bg-[#efefef] text-[#111827]">
+    <div
+      className="h-dvh w-full bg-[#efefef] text-[#111827]"
+      style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
+    >
       <div className="mx-auto flex h-full w-full max-w-[560px] flex-col bg-white shadow-sm">
-
-        <header className="flex h-[72px] shrink-0 items-center gap-4 border-b border-[#eeeeee] px-5">
+        <header className="flex h-auto min-h-[48px] shrink-0 items-center gap-3 border-b border-[#eeeeee] px-4 py-2.5">
           <Link
             href="/"
             aria-label="返回"
@@ -745,9 +847,11 @@ export function PolicyDocumentChat() {
           </button>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-8 pb-44 pt-14">
+        <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-14">
           {loadingMeta ? (
-            <div className="text-center text-[#9ca3af]">正在加载问答权限...</div>
+            <div className="text-center text-[#9ca3af]">
+              正在加载问答权限...
+            </div>
           ) : !knowledgeBases.length ? (
             <div className="rounded-xl border border-[#f0d6d6] bg-[#fff7f7] p-4 text-sm text-[#b91c1c]">
               {error || '暂无可用的问答知识库。'}
@@ -770,25 +874,27 @@ export function PolicyDocumentChat() {
                         {questions.length ? '常用问题' : '试试这样问'}
                       </div>
                       <div className="mt-5 space-y-3">
-                        {questions.length ? questions.map(item => (
-                          <button
-                            key={`${item.question}-${item.hitCount}-${item.source || 'stat'}`}
-                            type="button"
-                            onClick={() => submit(item.question)}
-                            className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
-                          >
-                            {item.question}
-                          </button>
-                        )) : exampleQuestions.map(q => (
-                          <button
-                            key={q}
-                            type="button"
-                            onClick={() => submit(q)}
-                            className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
-                          >
-                            {q}
-                          </button>
-                        ))}
+                        {questions.length
+                          ? questions.map(item => (
+                              <button
+                                key={`${item.question}-${item.hitCount}-${item.source || 'stat'}`}
+                                type="button"
+                                onClick={() => submit(item.question)}
+                                className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
+                              >
+                                {item.question}
+                              </button>
+                            ))
+                          : exampleQuestions.map(q => (
+                              <button
+                                key={q}
+                                type="button"
+                                onClick={() => submit(q)}
+                                className="w-full rounded-xl border border-[#eeeeee] bg-white px-5 py-4 text-left text-[18px] leading-7 text-[#374151] shadow-sm"
+                              >
+                                {q}
+                              </button>
+                            ))}
                       </div>
                     </div>
                   ) : (
@@ -800,14 +906,21 @@ export function PolicyDocumentChat() {
               ) : null}
 
               {messages.map((message, index) => (
-                <ConversationMessage key={index} message={message} onViewDocument={(docId, segId) => setViewerDoc({ documentId: docId, focusSegmentId: segId })} onClarify={option => submit(option)} />
+                <ConversationMessage
+                  key={index}
+                  message={message}
+                  onViewDocument={(docId, segId) =>
+                    setViewerDoc({ documentId: docId, focusSegmentId: segId })
+                  }
+                  onClarify={option => submit(option)}
+                />
               ))}
               <div ref={bottomRef} />
             </div>
           )}
         </main>
 
-        <footer className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-[#eeeeee] bg-white">
+        <footer className="shrink-0 border-t border-[#eeeeee] bg-white">
           <div className="grid grid-cols-[minmax(0,1fr)_112px_112px] gap-2 px-4 pb-2 pt-2 sm:grid-cols-[minmax(0,1fr)_144px_144px]">
             <button
               type="button"
@@ -816,7 +929,9 @@ export function PolicyDocumentChat() {
               className="flex h-12 min-w-0 items-center rounded-xl border border-[#e5e7eb] bg-white px-3 text-left text-[15px] text-[#8c929c] disabled:text-[#9ca3af]"
             >
               <span className="shrink-0">当前文档类型：</span>
-              <span className="min-w-0 flex-1 truncate text-[#555]">{selectedKnowledgeLabel}</span>
+              <span className="min-w-0 flex-1 truncate text-[#555]">
+                {selectedKnowledgeLabel}
+              </span>
               <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-[#9ca3af]" />
             </button>
             <button
@@ -854,6 +969,9 @@ export function PolicyDocumentChat() {
             onChange={setInput}
             onSubmit={submit}
             onStop={stop}
+            onFocus={() =>
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+            }
           />
         </footer>
 
@@ -862,7 +980,9 @@ export function PolicyDocumentChat() {
             <div className="w-full rounded-t-2xl bg-white px-5 pb-5 pt-4 shadow-xl">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <div className="text-lg font-bold text-[#111827]">选择文档库</div>
+                  <div className="text-lg font-bold text-[#111827]">
+                    选择文档库
+                  </div>
                   <div className="mt-1 text-sm text-[#8b8f99]">
                     当前问题只会检索选中的文档库
                   </div>
@@ -912,14 +1032,22 @@ export function PolicyDocumentChat() {
                     }
                   }
                   const order = ['policy', 'manual', 'form', 'rule', 'case']
-                  const sections: { label: string; items: KnowledgeBase[] }[] = []
+                  const sections: { label: string; items: KnowledgeBase[] }[] =
+                    []
                   for (const key of order) {
-                    if (groups[key]) sections.push({ label: docTypeLabels[key], items: groups[key] })
+                    if (groups[key])
+                      sections.push({
+                        label: docTypeLabels[key],
+                        items: groups[key]
+                      })
                   }
-                  if (ungrouped.length) sections.push({ label: '其他', items: ungrouped })
+                  if (ungrouped.length)
+                    sections.push({ label: '其他', items: ungrouped })
                   return sections.map(section => (
                     <div key={section.label}>
-                      <div className="mb-2 text-[13px] font-semibold text-[#9ca3af]">{section.label}</div>
+                      <div className="mb-2 text-[13px] font-semibold text-[#9ca3af]">
+                        {section.label}
+                      </div>
                       <div className="space-y-2">
                         {section.items.map(item => {
                           const selected = selectedKnowledgeSet.has(item.code)
@@ -937,9 +1065,13 @@ export function PolicyDocumentChat() {
                                     : 'flex w-full items-center justify-between rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-left text-[#374151]'
                               }
                             >
-                              <span className="min-w-0 flex-1 truncate font-semibold">{item.name}</span>
+                              <span className="min-w-0 flex-1 truncate font-semibold">
+                                {item.name}
+                              </span>
                               {isEmpty && item.emptyReason ? (
-                                <span className="ml-2 shrink-0 text-[11px] text-[#9ca3af]">{item.emptyReason}</span>
+                                <span className="ml-2 shrink-0 text-[11px] text-[#9ca3af]">
+                                  {item.emptyReason}
+                                </span>
                               ) : selected ? (
                                 <Check className="ml-3 h-4 w-4 shrink-0" />
                               ) : null}
@@ -974,8 +1106,3 @@ export function PolicyDocumentChat() {
     </div>
   )
 }
-
-
-
-
-

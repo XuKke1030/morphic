@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { LogOut, UserRound } from 'lucide-react'
 
 import { useChatDbAuth } from '@/lib/contexts/chatdb-auth-context'
+import { useVisualViewport } from '@/hooks/use-visual-viewport'
 
 type Topic = {
   code?: string
@@ -49,6 +50,7 @@ function topicLabel(topic: Topic) {
 
 export function QuestionPlatformHome() {
   const { username, logout: authLogout } = useChatDbAuth()
+  const { height: vvHeight } = useVisualViewport()
   const [topics, setTopics] = useState<Topic[]>([])
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [loadingTopics, setLoadingTopics] = useState(true)
@@ -203,12 +205,13 @@ export function QuestionPlatformHome() {
   }
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]">
+    <div
+      className="h-dvh w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]"
+      style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
+    >
       <div className="mx-auto min-h-full max-w-[560px] bg-white">
-        <header className="flex h-[90px] items-center justify-between border-b border-[#eeeeee] px-8">
-          <h1 className="text-[28px] font-bold tracking-normal">
-            问答问数平台
-          </h1>
+        <header className="flex h-auto min-h-[56px] items-center justify-between border-b border-[#eeeeee] px-5 py-3">
+          <h1 className="text-xl font-bold tracking-normal">问答问数平台</h1>
           <div ref={profileRef} className="relative">
             <button
               type="button"
@@ -244,17 +247,17 @@ export function QuestionPlatformHome() {
           </div>
         </header>
 
-        <main className="px-8 pt-12">
+        <main className="px-5 pt-6">
           <section>
-            <h2 className="text-[38px] font-extrabold leading-tight tracking-normal">
+            <h2 className="text-2xl font-extrabold leading-tight tracking-normal">
               {bootstrap?.welcomeMessage || `您好，${userName}`}
             </h2>
-            <p className="mt-5 text-[20px] text-[#8b8f99]">
+            <p className="mt-3 text-base text-[#8b8f99]">
               {bootstrap?.welcomeSubtext || '请选择业务主题'}
             </p>
 
             <div
-              className="mt-12 grid gap-3"
+              className="mt-6 grid gap-3"
               style={{
                 gridTemplateColumns: `repeat(${Math.max(Math.min(topics.length, 3), 1)}, minmax(0, 1fr))`
               }}
@@ -263,7 +266,7 @@ export function QuestionPlatformHome() {
                 <Link
                   key={topic.value}
                   href={`/ask?topic=${topicCode(topic)}`}
-                  className="flex h-[74px] items-center justify-center rounded-[13px] border border-[#e8e8e8] bg-white text-[22px] font-semibold shadow-[0_1px_8px_rgba(0,0,0,0.02)] transition hover:border-[#b8b8b8] hover:bg-[#fafafa]"
+                  className="flex h-14 items-center justify-center rounded-xl border border-[#e8e8e8] bg-white text-base font-semibold shadow-sm transition hover:border-[#b8b8b8] hover:bg-[#fafafa]"
                 >
                   {topicLabel(topic)}
                 </Link>
@@ -286,11 +289,11 @@ export function QuestionPlatformHome() {
             */}
 
             {exampleQuestions.length > 0 ? (
-              <div className="mt-8">
+              <div className="mt-5">
                 <h3 className="text-[16px] font-medium text-[#9aa0aa]">
                   试试这样问
                 </h3>
-                <div className="mt-3 space-y-2">
+                <div className="mt-2 space-y-1.5">
                   {exampleQuestions.map(eq => {
                     const topic = topics.find(t => topicCode(t) === eq.topic)
                     const href =
@@ -312,8 +315,8 @@ export function QuestionPlatformHome() {
             ) : null}
           </section>
 
-          <section className="mt-16">
-            <h3 className="text-[20px] font-normal text-[#9aa0aa]">实时告警</h3>
+          <section className="mt-8 pb-8">
+            <h3 className="text-[16px] font-normal text-[#9aa0aa]">实时告警</h3>
 
             <div className="mt-5 space-y-4">
               {alerts.map(alert => (
