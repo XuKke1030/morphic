@@ -2,7 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
 
-import { Mic, MicOff, Send, Square } from 'lucide-react'
+import { Mic, MicOff, Send, Square, X } from 'lucide-react'
 
 import { VoiceWaveform } from './voice-waveform'
 
@@ -268,8 +268,8 @@ export function QuestionInputBar({
   useEffect(() => {
     const textarea = textareaRef.current
     if (!textarea) return
-    textarea.style.height = '44px'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`
+    textarea.style.height = '36px'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 72)}px`
   }, [value, recording, transcribing])
 
   useEffect(() => {
@@ -306,17 +306,17 @@ export function QuestionInputBar({
   return (
     <form
       onSubmit={submit}
-      className="shrink-0 border-t border-[#eeeeee] bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom)]"
+      className="shrink-0 bg-white px-3 pt-2 pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="grid grid-cols-[44px_minmax(0,1fr)_52px_48px] items-center gap-3 rounded-2xl border border-[#e5e5e5] px-4 py-3 mb-2">
+      <div className="grid grid-cols-[36px_minmax(0,1fr)_36px] items-center gap-2 rounded-2xl border border-[#e5e5e5] px-3 py-2">
         <button
           type="button"
           onClick={recording ? stopRecording : startRecording}
           disabled={disabled || loading || transcribing}
           className={
             voiceBusy
-              ? 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#ff784f] text-white disabled:opacity-40'
-              : 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f3f4f6] text-[#8b8f99] disabled:opacity-40'
+              ? 'flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ff784f] text-white disabled:opacity-40'
+              : 'flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f3f4f6] text-[#8b8f99] disabled:opacity-40'
           }
           aria-label={
             recording ? '停止录音' : transcribing ? '正在转写' : '语音提问'
@@ -326,9 +326,9 @@ export function QuestionInputBar({
           }
         >
           {voiceBusy ? (
-            <MicOff className="h-5 w-5" />
+            <MicOff className="h-4 w-4" />
           ) : (
-            <Mic className="h-5 w-5" />
+            <Mic className="h-4 w-4" />
           )}
         </button>
 
@@ -348,29 +348,34 @@ export function QuestionInputBar({
             onKeyDown={handleKeyDown}
             onFocus={onFocus}
             placeholder={placeholder}
-            className="block h-[44px] max-h-[120px] w-full resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none placeholder:text-[#9ca3af] disabled:text-[#9ca3af]"
+            className="block min-h-[36px] max-h-[72px] w-full resize-none overflow-y-auto bg-transparent py-[6px] text-base leading-6 outline-none placeholder:text-[#9ca3af] disabled:text-[#9ca3af]"
           />
-        )}
-        {!recording && (
-          <span className="text-center text-xs tabular-nums text-[#999]">
-            {value.length}/{maxLength}
-          </span>
         )}
         <button
           type="submit"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#484848] text-white disabled:opacity-40"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#484848] text-white disabled:opacity-40"
           disabled={!loading && (disabled || voiceBusy || !value.trim())}
           aria-label={loading ? '停止回答' : '发送'}
         >
           {loading ? (
             <Square className="h-4 w-4" />
           ) : (
-            <Send className="h-5 w-5" />
+            <Send className="h-4 w-4" />
           )}
         </button>
       </div>
       {voiceError ? (
-        <div className="mt-2 px-2 text-xs text-[#ef4444]">{voiceError}</div>
+        <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs text-[#dc2626]">
+          <span className="min-w-0 flex-1">{voiceError}</span>
+          <button
+            type="button"
+            onClick={() => setVoiceError('')}
+            className="shrink-0 text-[#f87171] hover:text-[#dc2626]"
+            aria-label="关闭"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       ) : null}
     </form>
   )

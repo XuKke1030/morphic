@@ -211,7 +211,9 @@ export function QuestionPlatformHome() {
     >
       <div className="mx-auto min-h-full max-w-[560px] bg-white">
         <header className="flex h-auto min-h-[56px] items-center justify-between border-b border-[#eeeeee] px-5 py-3">
-          <h1 className="text-xl font-bold tracking-normal">问答问数平台</h1>
+          <h1 className="whitespace-nowrap text-lg font-bold tracking-normal sm:text-xl">
+            问数平台
+          </h1>
           <div ref={profileRef} className="relative">
             <button
               type="button"
@@ -266,7 +268,7 @@ export function QuestionPlatformHome() {
                 <Link
                   key={topic.value}
                   href={`/ask?topic=${topicCode(topic)}`}
-                  className="flex h-14 items-center justify-center rounded-xl border border-[#e8e8e8] bg-white text-base font-semibold shadow-sm transition hover:border-[#b8b8b8] hover:bg-[#fafafa]"
+                  className="flex h-14 items-center justify-center rounded-xl border border-[#e8e8e8] bg-white text-base font-semibold shadow-[0_2px_8px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.06)] transition hover:shadow-[0_4px_14px_rgba(0,0,0,0.14),0_2px_6px_rgba(0,0,0,0.08)] hover:border-[#d0d0d0] active:shadow-[0_1px_4px_rgba(0,0,0,0.08)] active:translate-y-[1px]"
                 >
                   {topicLabel(topic)}
                 </Link>
@@ -318,26 +320,26 @@ export function QuestionPlatformHome() {
           <section className="mt-8 pb-8">
             <h3 className="text-[16px] font-normal text-[#9aa0aa]">实时告警</h3>
 
-            <div className="mt-5 space-y-4">
+            <div className="mt-3 space-y-2">
               {alerts.map(alert => (
                 <Link
                   key={alert.id}
                   href={`/ask?topic=${alert.topic}&alertId=${alert.id}&autoAsk=1&q=${encodeURIComponent(alert.question || alert.content)}`}
-                  className="group flex min-h-[98px] items-center rounded-[13px] border border-[#ffcfc5] bg-[#fff8f6] px-7 text-left"
+                  className="group flex items-center rounded-xl border border-[#ffcfc5] bg-[#fff8f6] px-4 py-3 text-left"
                 >
-                  <span className="mr-4 h-[55px] w-1 rounded-full bg-[#ff784f]" />
+                  <span className="mr-3 h-10 w-0.5 rounded-full bg-[#ff784f]" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[17px] text-[#ff5f3d]">
-                      {alert.displayTimeText || '刚刚'}
-                    </span>
-                    <span className="mt-2 block truncate text-[18px] text-[#333]">
+                    <span className="block truncate text-base text-[#333]">
                       {alert.title || alert.content}
                     </span>
+                  </span>
+                  <span className="ml-3 shrink-0 text-xs text-[#ff5f3d]">
+                    {alert.displayTimeText || '刚刚'}
                   </span>
                   <button
                     type="button"
                     aria-label="关闭告警"
-                    className="mr-5 text-[22px] leading-none text-[#ff8b72]"
+                    className="ml-3 text-lg leading-none text-[#ff8b72]"
                     onClick={event => {
                       event.preventDefault()
                       dismissAlert(alert.id)
@@ -345,7 +347,7 @@ export function QuestionPlatformHome() {
                   >
                     ×
                   </button>
-                  <span className="text-[24px] text-[#ff8b72] transition group-hover:translate-x-1">
+                  <span className="ml-2 text-xl text-[#ff8b72] transition group-hover:translate-x-1">
                     ›
                   </span>
                 </Link>

@@ -853,8 +853,11 @@ export function PolicyDocumentChat() {
               正在加载问答权限...
             </div>
           ) : !knowledgeBases.length ? (
-            <div className="rounded-xl border border-[#f0d6d6] bg-[#fff7f7] p-4 text-sm text-[#b91c1c]">
-              {error || '暂无可用的问答知识库。'}
+            <div className="flex items-center gap-2 rounded-xl border border-[#f0d6d6] bg-[#fff7f7] p-4 text-sm text-[#b91c1c]">
+              <span className="min-w-0 flex-1">{error || "暂无可用的问答知识库。"}</span>
+              <button type="button" onClick={() => setError("")} className="shrink-0 text-[#f87171] hover:text-[#dc2626]" aria-label="关闭">
+                <X className="h-4 w-4" />
+              </button>
             </div>
           ) : (
             <div className="space-y-8">
@@ -964,7 +967,7 @@ export function PolicyDocumentChat() {
             value={input}
             maxLength={documentQuestionMaxLength}
             loading={loading}
-            placeholder="输入您的问题，最多100字"
+            placeholder="输入您的问题..."
             disabled={!selectedKnowledgeCodes.length}
             onChange={setInput}
             onSubmit={submit}

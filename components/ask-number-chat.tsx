@@ -1534,6 +1534,7 @@ function AnalysisDetails({
     collapsedDefault !== false ? false : true
   )
   const Icon = expanded ? ChevronUp : ChevronDown
+  const displayTitle = title === '特征洞察' ? '数据说明' : title === '洞察分析' ? '洞察建议' : title
   const isInsight = title.includes('洞察')
   const borderColor = isInsight ? 'border-[#d4e0f7]' : 'border-[#cfe8b8]'
   const bgColor = isInsight ? 'bg-[#f5f8ff]' : 'bg-[#f8fff2]'
@@ -1549,7 +1550,7 @@ function AnalysisDetails({
         aria-expanded={expanded}
       >
         <span className={`text-sm font-semibold ${textColor}`}>
-          {expanded ? `收起${title}` : `展开${title}`}
+          {expanded ? `收起${displayTitle}` : `展开${displayTitle}`}
         </span>
         <Icon className={`h-4 w-4 shrink-0 ${textColor}`} />
       </button>
@@ -1779,14 +1780,7 @@ function AssistantContent({
             </section>
           )
         })}
-        {elapsedMs != null && (
-          <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
-            <span>
-              数据来源：{tables ? tables.split(',').join('、') : '数据表'}
-            </span>
-            <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
-          </div>
-        )}
+
       </div>
     )
   }
@@ -1812,14 +1806,6 @@ function AssistantContent({
           </Streamdown>
         )
       })}
-      {elapsedMs != null && (
-        <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
-          <span>
-            数据来源：{tables ? tables.split(',').join('、') : '数据表'}
-          </span>
-          <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
-        </div>
-      )}
     </div>
   )
 }
@@ -2866,7 +2852,6 @@ export function AskNumberChat({
             <h1 className="text-xl font-bold tracking-normal">
               {topicLabel}问数
             </h1>
-            <p className="text-sm text-[#8b8f99]">当前只连接问数后端</p>
           </div>
           <button
             type="button"
@@ -2958,25 +2943,7 @@ export function AskNumberChat({
                       ) : loading ? (
                         '正在查询...'
                       ) : null}
-                      {message.content ? (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const copied = await copyAnswer(message.content)
-                            if (copied) {
-                              setCopiedMessageIndex(index)
-                              window.setTimeout(
-                                () => setCopiedMessageIndex(null),
-                                1500
-                              )
-                            }
-                          }}
-                          className="mt-3 flex w-fit items-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-1 text-xs text-[#6b7280]"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                          {copiedMessageIndex === index ? '已复制' : '复制'}
-                        </button>
-                      ) : null}
+                      
                     </>
                   ) : (
                     message.content
@@ -2992,7 +2959,7 @@ export function AskNumberChat({
           value={input}
           loading={loading}
           topic={topic}
-          placeholder={inputPlaceholder || `输入${topicLabel}问题，最多100字`}
+          placeholder={`输入${topicLabel}问题...`}
           onChange={setInput}
           onSubmit={submit}
           onStop={stop}
