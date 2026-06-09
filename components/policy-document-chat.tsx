@@ -446,7 +446,7 @@ function ConversationMessage({
 }
 
 export function PolicyDocumentChat() {
-  const { height: vvHeight } = useVisualViewport()
+  const { height: vvHeight, offsetTop: vvOffsetTop } = useVisualViewport()
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [knowledgeCode, setKnowledgeCode] = useState('')
   const [questions, setQuestions] = useState<PopularQuestion[]>([])
@@ -824,7 +824,7 @@ export function PolicyDocumentChat() {
   return (
     <div
       className="w-full bg-[#efefef] text-[#111827]"
-      style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
+      style={{ marginTop: vvOffsetTop ? `${vvOffsetTop}px` : 0, height: vvHeight ? `${vvHeight}px` : '100%' }}
     >
       <div className="mx-auto flex h-full w-full max-w-[560px] flex-col bg-white shadow-sm">
         <header className="flex h-auto min-h-[48px] shrink-0 items-center gap-3 border-b border-[#eeeeee] px-4 py-2.5">

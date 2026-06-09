@@ -2244,7 +2244,7 @@ export function AskNumberChat({
   initialQuestion?: string
   initialTopic: string
 }) {
-  const { height: vvHeight } = useVisualViewport()
+  const { height: vvHeight, offsetTop: vvOffsetTop } = useVisualViewport()
   const [topic] = useState(initialTopic)
   const [input, setInput] = useState(() => {
     if (typeof window === 'undefined') return ''
@@ -2832,7 +2832,7 @@ export function AskNumberChat({
   return (
     <div
       className="flex w-full flex-col bg-[#f7f7f7] text-[#111827]"
-      style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
+      style={{ marginTop: vvOffsetTop ? `${vvOffsetTop}px` : 0, height: vvHeight ? `${vvHeight}px` : '100%' }}
     >
       <div className="mx-auto flex h-full w-full max-w-[560px] flex-col bg-white">
         <header className="flex h-auto min-h-[48px] shrink-0 items-center gap-3 border-b border-[#eeeeee] px-4 py-2.5">

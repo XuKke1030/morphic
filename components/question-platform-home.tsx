@@ -50,7 +50,7 @@ function topicLabel(topic: Topic) {
 
 export function QuestionPlatformHome() {
   const { username, logout: authLogout } = useChatDbAuth()
-  const { height: vvHeight } = useVisualViewport()
+  const { height: vvHeight, offsetTop: vvOffsetTop } = useVisualViewport()
   const [topics, setTopics] = useState<Topic[]>([])
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [loadingTopics, setLoadingTopics] = useState(true)
@@ -207,7 +207,7 @@ export function QuestionPlatformHome() {
   return (
     <div
       className="w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]"
-      style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
+      style={{ marginTop: vvOffsetTop ? `${vvOffsetTop}px` : 0, height: vvHeight ? `${vvHeight}px` : '100%' }}
     >
       <div className="mx-auto min-h-full max-w-[560px] bg-white">
         <header className="flex h-auto min-h-[56px] items-center justify-between border-b border-[#eeeeee] px-5 py-3">
