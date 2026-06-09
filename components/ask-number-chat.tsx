@@ -2831,7 +2831,7 @@ export function AskNumberChat({
 
   return (
     <div
-      className="flex h-dvh w-full flex-col bg-[#f7f7f7] text-[#111827]"
+      className="flex w-full flex-col bg-[#f7f7f7] text-[#111827]"
       style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
     >
       <div className="mx-auto flex h-full w-full max-w-[560px] flex-col bg-white">

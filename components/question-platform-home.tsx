@@ -206,7 +206,7 @@ export function QuestionPlatformHome() {
 
   return (
     <div
-      className="h-dvh w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]"
+      className="w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]"
       style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
     >
       <div className="mx-auto min-h-full max-w-[560px] bg-white">

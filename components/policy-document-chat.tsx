@@ -823,7 +823,7 @@ export function PolicyDocumentChat() {
 
   return (
     <div
-      className="h-dvh w-full bg-[#efefef] text-[#111827]"
+      className="w-full bg-[#efefef] text-[#111827]"
       style={{ height: vvHeight ? `${vvHeight}px` : '100dvh' }}
     >
       <div className="mx-auto flex h-full w-full max-w-[560px] flex-col bg-white shadow-sm">
