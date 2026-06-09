@@ -61,7 +61,7 @@ export default async function RootLayout({
   const userId = user?.id ?? (await getCurrentUserId())
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <body
         className={cn(
           'h-full flex flex-col font-sans antialiased overflow-hidden'
