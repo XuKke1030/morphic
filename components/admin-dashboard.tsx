@@ -220,11 +220,11 @@ const menuGroups: Array<{
         label: '问题沉淀管理',
         icon: Search
       },
-      {
+     /*  {
         key: 'documents' as AdminSection,
         label: '文档关联管理',
         icon: FileText
-      }
+      } */
     ]
   },
   {
@@ -243,7 +243,7 @@ const sectionTitles: Record<AdminSection, string> = {
   questions: '示例问题管理',
   data: '数据接入管理',
   candidates: '问题沉淀管理',
-  documents: '文档关联管理',
+  // documents: '文档关联管理',
   logs: '操作日志'
 }
 
