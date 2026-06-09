@@ -20,7 +20,7 @@ export function useVisualViewport() {
         setHeight(vvH)
         setOffsetTop(vv.offsetTop)
       } else {
-        setHeight(fullH)
+        setHeight(null)
         setOffsetTop(0)
       }
     }
