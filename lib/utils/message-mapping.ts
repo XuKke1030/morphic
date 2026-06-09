@@ -1,10 +1,5 @@
 import { generateId } from '@/lib/db/schema'
-import type {
-  UIDataTypes,
-  UIMessage,
-  UIMessageMetadata,
-  UITools
-} from '@/lib/types/ai'
+import type { UIMessage, UIMessageMetadata } from '@/lib/types/ai'
 import type { DynamicToolPart } from '@/lib/types/dynamic-tools'
 import type {
   DBMessagePart,
@@ -13,11 +8,11 @@ import type {
 } from '@/lib/types/message-persistence'
 
 // Define local types for message parts that are compatible with the AI SDK
-type TextUIPart = { type: 'text'; text: string; providerMetadata?: any }
+type TextUIPart = { type: 'text'; text: string; providerMetadata?: unknown }
 type ReasoningUIPart = {
   type: 'reasoning'
   text: string
-  providerMetadata?: any
+  providerMetadata?: unknown
 }
 type FileUIPart = {
   type: 'file'
@@ -30,7 +25,7 @@ type SourceUrlUIPart = {
   sourceId: string
   url: string
   title: string
-} // title is required
+}
 type SourceDocumentUIPart = {
   type: 'source-document'
   sourceId: string
@@ -39,20 +34,20 @@ type SourceDocumentUIPart = {
   filename: string
   url: string
   snippet: string
-} // all fields required
+}
 type ToolCallPart = {
   type: 'tool-call'
   toolCallId: string
   toolName: string
-  args: any
+  args: unknown
 }
 type ToolResultPart = {
   type: 'tool-result'
   toolCallId: string
-  result: any
+  result: unknown
   isError?: boolean
 }
-type DataPart = { type: string; [key: string]: any }
+type DataPart = { type: string; data?: unknown; id?: string }
 
 type UIMessagePart =
   | TextUIPart
@@ -65,20 +60,15 @@ type UIMessagePart =
   | DataPart
 
 // Type guards
-function isToolCallPart(part: any): part is ToolCallPart {
+function isToolCallPart(part: unknown): part is ToolCallPart {
   return (
+    typeof part === 'object' &&
+    part !== null &&
+    'type' in part &&
     part.type === 'tool-call' &&
-    typeof part.toolCallId === 'string' &&
-    typeof part.toolName === 'string' &&
-    part.args !== undefined
-  )
-}
-
-function isToolResultPart(part: any): part is ToolResultPart {
-  return (
-    part.type === 'tool-result' &&
-    typeof part.toolCallId === 'string' &&
-    part.result !== undefined
+    typeof (part as ToolCallPart).toolCallId === 'string' &&
+    typeof (part as ToolCallPart).toolName === 'string' &&
+    'args' in part
   )
 }
 
@@ -88,15 +78,16 @@ type ExtendedToolPart = {
   toolCallId?: string
   state?: ToolState
   errorText?: string
-  input?: any
-  output?: any
+  input?: unknown
+  output?: unknown
 }
 
-function isExtendedToolPart(part: any): part is ExtendedToolPart {
+function isExtendedToolPart(part: unknown): part is ExtendedToolPart {
   return (
     typeof part === 'object' &&
     part !== null &&
-    typeof part.type === 'string' &&
+    'type' in part &&
+    typeof (part.type) === 'string' &&
     part.type.startsWith('tool-')
   )
 }
@@ -121,6 +112,60 @@ function createToolPartMapping(
   } as DBMessagePart
 }
 
+// Tool names that use the standard 4-state pattern in the DB
+const STANDARD_TOOL_NAMES = ['search', 'fetch', 'question', 'todoWrite', 'todoRead'] as const
+
+type StandardToolUIPart = {
+  type: `tool-${string}`
+  toolCallId: string
+  input: unknown
+  state: 'input-streaming' | 'input-available' | 'output-available' | 'output-error'
+  output?: unknown
+  errorText?: string
+}
+
+/**
+ * Build a tool UI part from DB data using the standard 4-state pattern.
+ */
+function buildStandardToolPart(
+  toolName: string,
+  part: DBMessagePartSelect
+): StandardToolUIPart {
+  const inputColumn = `tool_${toolName}_input` as keyof DBMessagePartSelect
+  const outputColumn = `tool_${toolName}_output` as keyof DBMessagePartSelect
+
+  if (!part.tool_state) {
+    throw new Error(`tool_state is undefined for ${toolName}`)
+  }
+
+  const base = {
+    type: `tool-${toolName}` as const,
+    toolCallId: part.tool_toolCallId || '',
+    input: part[inputColumn]
+  }
+
+  switch (part.tool_state) {
+    case 'input-streaming':
+      return { ...base, state: 'input-streaming' }
+    case 'input-available':
+      return { ...base, state: 'input-available' }
+    case 'output-available':
+      return {
+        ...base,
+        state: 'output-available',
+        output: part[outputColumn]
+      }
+    case 'output-error':
+      return {
+        ...base,
+        state: 'output-error',
+        errorText: part.tool_errorText || ''
+      }
+    default:
+      throw new Error(`Unknown tool state: ${part.tool_state}`)
+  }
+}
+
 /**
  * Convert UI message parts to DB format
  */
@@ -136,49 +181,58 @@ export function mapUIMessagePartsToDBParts(
     }
 
     switch (part.type) {
-      case 'text':
+      case 'text': {
+        const { text } = part as TextUIPart
         return {
           ...basePart,
-          text_text: part.text
+          text_text: text
         }
+      }
 
-      case 'reasoning':
+      case 'reasoning': {
+        const { text, providerMetadata } = part as ReasoningUIPart
         return {
           ...basePart,
-          reasoning_text: part.text,
-          providerMetadata: part.providerMetadata
+          reasoning_text: text,
+          providerMetadata: providerMetadata as Record<string, any> | null | undefined
         }
+      }
 
-      case 'file':
+      case 'file': {
+        const { mediaType, filename, url } = part as FileUIPart
         return {
           ...basePart,
-          file_mediaType: part.mediaType,
-          file_filename: part.filename,
-          file_url: part.url
+          file_mediaType: mediaType,
+          file_filename: filename,
+          file_url: url
         }
+      }
 
-      case 'source-url':
+      case 'source-url': {
+        const { sourceId, url, title } = part as SourceUrlUIPart
         return {
           ...basePart,
-          source_url_sourceId: part.sourceId,
-          source_url_url: part.url,
-          source_url_title: part.title
+          source_url_sourceId: sourceId,
+          source_url_url: url,
+          source_url_title: title
         }
+      }
 
-      case 'source-document':
+      case 'source-document': {
+        const p = part as SourceDocumentUIPart
         return {
           ...basePart,
-          source_document_sourceId: part.sourceId,
-          source_document_mediaType: part.mediaType,
-          source_document_title: part.title,
-          source_document_filename: part.filename,
-          source_document_url: part.url,
-          source_document_snippet: part.snippet
+          source_document_sourceId: p.sourceId,
+          source_document_mediaType: p.mediaType,
+          source_document_title: p.title,
+          source_document_filename: p.filename,
+          source_document_url: p.url,
+          source_document_snippet: p.snippet
         }
+      }
 
       // Tool parts
-      case 'tool-call':
-        // Type guard ensures part has the required properties
+      case 'tool-call': {
         if (!isToolCallPart(part)) {
           console.error('Invalid tool-call part:', part)
           return null
@@ -203,10 +257,12 @@ export function mapUIMessagePartsToDBParts(
         }
 
         return result
+      }
 
-      case 'tool-result':
+      case 'tool-result': {
+        const toolResultPart = part as ToolResultPart
         const resultToolName = getToolNameFromCallId(
-          part.toolCallId,
+          toolResultPart.toolCallId,
           messageParts
         )
         const toolOutputColumn =
@@ -215,18 +271,18 @@ export function mapUIMessagePartsToDBParts(
         const toolResult = {
           ...basePart,
           type: `tool-${resultToolName}`,
-          tool_toolCallId: part.toolCallId,
-          tool_state: part.isError
+          tool_toolCallId: toolResultPart.toolCallId,
+          tool_state: toolResultPart.isError
             ? 'output-error'
             : ('output-available' as ToolState),
-          tool_errorText: part.isError ? String(part.result) : undefined,
-          [toolOutputColumn]: !part.isError ? part.result : undefined
+          tool_errorText: toolResultPart.isError ? String(toolResultPart.result) : undefined,
+          [toolOutputColumn]: !toolResultPart.isError ? toolResultPart.result : undefined
         } as DBMessagePart
 
         // Preserve dynamic tool metadata from the corresponding tool-call
         if (resultToolName === 'dynamic') {
           const toolCallPart = messageParts.find(
-            p => isToolCallPart(p) && p.toolCallId === part.toolCallId
+            p => isToolCallPart(p) && p.toolCallId === toolResultPart.toolCallId
           ) as ToolCallPart | undefined
 
           if (toolCallPart) {
@@ -240,20 +296,20 @@ export function mapUIMessagePartsToDBParts(
         }
 
         return toolResult
+      }
 
-      // Step parts (for UI tracking)
+      // Step parts
       case 'step-start':
-        // Persist step-start to maintain message structure
-        return basePart
+        return basePart as DBMessagePart
 
       case 'step-result':
       case 'step-continue':
       case 'step-finish':
-        return null // These are not needed for message structure
+        return null
 
       // Dynamic tool parts from AI SDK v5
-      case 'dynamic-tool':
-        const dynamicPart = part as DynamicToolPart
+      case 'dynamic-tool': {
+        const dynamicPart = part as unknown as DynamicToolPart
         return {
           ...basePart,
           type: 'tool-dynamic',
@@ -273,53 +329,28 @@ export function mapUIMessagePartsToDBParts(
               ? dynamicPart.errorText
               : undefined
         }
+      }
 
-      // Tool-specific parts that are not tool-call or tool-result
-      // The following cases are tool parts with state tracking
-      case 'tool-search':
-        if (!isExtendedToolPart(part)) {
-          console.error('Invalid extended tool part:', part)
-          return null
-        }
-        return createToolPartMapping(basePart, part, 'search')
-
-      case 'tool-fetch':
-        if (!isExtendedToolPart(part)) {
-          console.error('Invalid extended tool part:', part)
-          return null
-        }
-        return createToolPartMapping(basePart, part, 'fetch')
-
-      case 'tool-question':
-        if (!isExtendedToolPart(part)) {
-          console.error('Invalid extended tool part:', part)
-          return null
-        }
-        return createToolPartMapping(basePart, part, 'question')
-
-      case 'tool-todoWrite':
-        if (!isExtendedToolPart(part)) {
-          console.error('Invalid extended tool part:', part)
-          return null
-        }
-        return createToolPartMapping(basePart, part, 'todoWrite')
-
-      case 'tool-todoRead':
-        if (!isExtendedToolPart(part)) {
-          console.error('Invalid extended tool part:', part)
-          return null
-        }
-        return createToolPartMapping(basePart, part, 'todoRead')
-
-      // Data parts
+      // Tool-specific extended parts (tool-search, tool-fetch, etc.)
       default:
+        if (isExtendedToolPart(part)) {
+          const extToolName = part.type.startsWith('tool-')
+            ? part.type.substring(5)
+            : null
+          if (extToolName && (STANDARD_TOOL_NAMES as readonly string[]).includes(extToolName)) {
+            return createToolPartMapping(basePart, part, extToolName)
+          }
+        }
+
+        // Data parts
         if (part.type.startsWith('data-')) {
-          const dataType = part.type.substring(5) // Remove 'data-' prefix
+          const dataPart = part as DataPart
+          const dataType = part.type.substring(5)
           return {
             ...basePart,
             data_prefix: dataType,
-            data_content: 'data' in part ? part.data : part,
-            data_id: 'id' in part ? part.id : undefined
+            data_content: dataPart.data,
+            data_id: dataPart.id
           }
         }
 
@@ -327,7 +358,7 @@ export function mapUIMessagePartsToDBParts(
         return {
           ...basePart,
           data_prefix: part.type,
-          data_content: part
+          data_content: part as unknown
         }
     }
   })
@@ -339,7 +370,7 @@ export function mapUIMessagePartsToDBParts(
 }
 
 /**
- * Convert DB message parts to UI format
+ * Convert DB message parts to UI format (data-driven)
  */
 export function mapDBPartToUIMessagePart(
   part: DBMessagePartSelect
@@ -385,240 +416,39 @@ export function mapDBPartToUIMessagePart(
         snippet: part.source_document_snippet || ''
       }
 
-    default:
+    default: {
       // Tool parts
       if (part.type.startsWith('tool-')) {
-        const toolName = part.type.substring(5) // Remove 'tool-' prefix
+        const toolName = part.type.substring(5)
+
+        // Special handling for dynamic tools
+        if (toolName === 'dynamic') {
+          return {
+            type: 'dynamic-tool' as const,
+            toolCallId: part.tool_toolCallId || '',
+            toolName: part.tool_dynamic_name || '',
+            state: part.tool_state as DynamicToolPart['state'],
+            input: part.tool_dynamic_input,
+            output: part.tool_dynamic_output,
+            errorText: part.tool_errorText
+          } as DynamicToolPart
+        }
+
+        // Data-driven handling for standard tool names
+        if ((STANDARD_TOOL_NAMES as readonly string[]).includes(toolName)) {
+          return buildStandardToolPart(toolName, part)
+        }
+
+        // Standard tool-call/tool-result pattern for other tools
         const inputColumn =
           `tool_${toolName}_input` as keyof DBMessagePartSelect
         const outputColumn =
           `tool_${toolName}_output` as keyof DBMessagePartSelect
 
-        // Special handling for dynamic tools
-        if (toolName === 'dynamic') {
-          return {
-            type: 'dynamic-tool',
-            toolCallId: part.tool_toolCallId || '',
-            toolName: part.tool_dynamic_name || '',
-            state: part.tool_state as any, // Maps directly to AI SDK states
-            input: part.tool_dynamic_input,
-            output: part.tool_dynamic_output,
-            errorText: part.tool_errorText
-          }
-        }
-
-        // Special handling for tool parts that maintain their type
-        if (toolName === 'search') {
-          if (!part.tool_state) {
-            throw new Error(`tool_state is undefined for ${toolName}`)
-          }
-
-          switch (part.tool_state) {
-            case 'input-streaming':
-              return {
-                type: 'tool-search',
-                state: 'input-streaming',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_search_input!
-              }
-            case 'input-available':
-              return {
-                type: 'tool-search',
-                state: 'input-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_search_input!
-              }
-            case 'output-available':
-              return {
-                type: 'tool-search',
-                state: 'output-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_search_input!,
-                output: part.tool_search_output!
-              }
-            case 'output-error':
-              return {
-                type: 'tool-search',
-                state: 'output-error',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_search_input!,
-                errorText: part.tool_errorText!
-              }
-            default:
-              throw new Error(`Unknown tool state: ${part.tool_state}`)
-          }
-        }
-
-        if (toolName === 'fetch') {
-          if (!part.tool_state) {
-            throw new Error(`tool_state is undefined for ${toolName}`)
-          }
-
-          switch (part.tool_state) {
-            case 'input-streaming':
-              return {
-                type: 'tool-fetch',
-                state: 'input-streaming',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_fetch_input!
-              }
-            case 'input-available':
-              return {
-                type: 'tool-fetch',
-                state: 'input-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_fetch_input!
-              }
-            case 'output-available':
-              return {
-                type: 'tool-fetch',
-                state: 'output-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_fetch_input!,
-                output: part.tool_fetch_output!
-              }
-            case 'output-error':
-              return {
-                type: 'tool-fetch',
-                state: 'output-error',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_fetch_input!,
-                errorText: part.tool_errorText!
-              }
-            default:
-              throw new Error(`Unknown tool state: ${part.tool_state}`)
-          }
-        }
-
-        if (toolName === 'question') {
-          if (!part.tool_state) {
-            throw new Error(`tool_state is undefined for ${toolName}`)
-          }
-
-          switch (part.tool_state) {
-            case 'input-streaming':
-              return {
-                type: 'tool-question',
-                state: 'input-streaming',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_question_input!
-              }
-            case 'input-available':
-              return {
-                type: 'tool-question',
-                state: 'input-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_question_input!
-              }
-            case 'output-available':
-              return {
-                type: 'tool-question',
-                state: 'output-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_question_input!,
-                output: part.tool_question_output!
-              }
-            case 'output-error':
-              return {
-                type: 'tool-question',
-                state: 'output-error',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_question_input!,
-                errorText: part.tool_errorText!
-              }
-            default:
-              throw new Error(`Unknown tool state: ${part.tool_state}`)
-          }
-        }
-
-        if (toolName === 'todoWrite') {
-          if (!part.tool_state) {
-            throw new Error(`tool_state is undefined for ${toolName}`)
-          }
-
-          switch (part.tool_state) {
-            case 'input-streaming':
-              return {
-                type: 'tool-todoWrite',
-                state: 'input-streaming',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoWrite_input!
-              }
-            case 'input-available':
-              return {
-                type: 'tool-todoWrite',
-                state: 'input-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoWrite_input!
-              }
-            case 'output-available':
-              return {
-                type: 'tool-todoWrite',
-                state: 'output-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoWrite_input!,
-                output: part.tool_todoWrite_output!
-              }
-            case 'output-error':
-              return {
-                type: 'tool-todoWrite',
-                state: 'output-error',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoWrite_input!,
-                errorText: part.tool_errorText!
-              }
-            default:
-              throw new Error(`Unknown tool state: ${part.tool_state}`)
-          }
-        }
-
-        if (toolName === 'todoRead') {
-          if (!part.tool_state) {
-            throw new Error(`tool_state is undefined for ${toolName}`)
-          }
-
-          switch (part.tool_state) {
-            case 'input-streaming':
-              return {
-                type: 'tool-todoRead',
-                state: 'input-streaming',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoRead_input!
-              }
-            case 'input-available':
-              return {
-                type: 'tool-todoRead',
-                state: 'input-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoRead_input!
-              }
-            case 'output-available':
-              return {
-                type: 'tool-todoRead',
-                state: 'output-available',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoRead_input!,
-                output: part.tool_todoRead_output!
-              }
-            case 'output-error':
-              return {
-                type: 'tool-todoRead',
-                state: 'output-error',
-                toolCallId: part.tool_toolCallId || '',
-                input: part.tool_todoRead_input!,
-                errorText: part.tool_errorText!
-              }
-            default:
-              throw new Error(`Unknown tool state: ${part.tool_state}`)
-          }
-        }
-
-        // Standard tool-call/tool-result pattern
         if (
           part.tool_state === 'input-available' ||
           part.tool_state === 'input-streaming'
         ) {
-          // For dynamic tools, use the stored original name
           const originalToolName =
             toolName === 'dynamic' && part.tool_dynamic_name
               ? part.tool_dynamic_name
@@ -628,10 +458,9 @@ export function mapDBPartToUIMessagePart(
             type: 'tool-call',
             toolCallId: part.tool_toolCallId || '',
             toolName: originalToolName,
-            args: part[inputColumn] as any
+            args: part[inputColumn]
           }
         } else {
-          // output-available or output-error
           return {
             type: 'tool-result',
             toolCallId: part.tool_toolCallId || '',
@@ -660,8 +489,8 @@ export function mapDBPartToUIMessagePart(
         }
       }
 
-      // Fallback - should not happen
       throw new Error(`Unknown part type: ${part.type}`)
+    }
   }
 }
 
@@ -669,7 +498,6 @@ export function mapDBPartToUIMessagePart(
  * Normalize tool name (from tool-call's toolName)
  */
 function getToolNameFromType(toolName: string): string {
-  // Map original tool names to DB column names
   const toolNameMap: Record<string, string> = {
     search: 'search',
     fetch: 'fetch',
@@ -679,7 +507,6 @@ function getToolNameFromType(toolName: string): string {
     todoRead: 'todoRead'
   }
 
-  // For dynamic tools (MCP and others)
   if (toolName.startsWith('mcp__') || toolName.startsWith('dynamic__')) {
     return 'dynamic'
   }
@@ -694,16 +521,14 @@ function getToolNameFromCallId(
   toolCallId: string,
   allParts: UIMessagePart[]
 ): string {
-  // Find tool-call part with the same toolCallId
   const toolCallPart = allParts.find(
-    part => part.type === 'tool-call' && part.toolCallId === toolCallId
-  ) as any
+    part => part.type === 'tool-call' && (part as ToolCallPart).toolCallId === toolCallId
+  ) as ToolCallPart | undefined
 
   if (toolCallPart) {
     return getToolNameFromType(toolCallPart.toolName)
   }
 
-  // Fallback - should not happen
   return 'unknown'
 }
 
@@ -717,7 +542,7 @@ function getOriginalToolName(dbToolName: string): string {
     question: 'askQuestion',
     todoWrite: 'todoWrite',
     todoRead: 'todoRead',
-    dynamic: 'dynamic' // For dynamic tools, the actual tool name is stored separately
+    dynamic: 'dynamic'
   }
 
   return reverseMap[dbToolName] || dbToolName
@@ -754,7 +579,6 @@ export function buildUIMessageFromDB(
   },
   dbParts: DBMessagePartSelect[]
 ): UIMessage {
-  // Merge metadata from DB with createdAt
   const metadata: UIMessageMetadata = {
     ...(dbMessage.metadata || {}),
     ...(dbMessage.createdAt && {

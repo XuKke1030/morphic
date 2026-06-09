@@ -216,31 +216,42 @@ describe('Chat Actions', () => {
         role: 'user',
         parts: [{ type: 'text', text: 'Hello' }]
       }
-      const mockChat: Chat = {
-        id: expect.any(String),
-        title: 'Hello',
-        userId,
-        visibility: 'private',
-        createdAt: new Date()
-      }
-      const mockMessage: Message = {
-        id: 'msg-1',
-        chatId: mockChat.id,
-        role: 'user',
-        metadata: {},
-        createdAt: new Date(),
-        updatedAt: null
+      const mockResult = {
+        chat: {
+          id: expect.any(String),
+          title: 'Hello',
+          userId,
+          visibility: 'private' as const,
+          createdAt: new Date()
+        },
+        message: {
+          id: 'msg-1',
+          chatId: expect.any(String),
+          role: 'user' as const,
+          metadata: null,
+          createdAt: new Date(),
+          updatedAt: null
+        }
       }
 
       vi.mocked(getCurrentUserId).mockResolvedValue(userId)
-      vi.mocked(dbActions.createChat).mockResolvedValue(mockChat)
-      vi.mocked(dbActions.upsertMessage).mockResolvedValue(mockMessage)
+      vi.mocked(
+        dbActions.createChatWithFirstMessageTransaction
+      ).mockResolvedValue(mockResult)
 
       const result = await createChatAndSaveMessage(message)
 
-      expect(result.chat).toEqual(mockChat)
-      expect(result.message).toEqual(mockMessage)
+      expect(result.chat).toEqual(mockResult.chat)
+      expect(result.message).toEqual(mockResult.message)
       expect(getCurrentUserId).toHaveBeenCalled()
+      expect(
+        dbActions.createChatWithFirstMessageTransaction
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          message: expect.objectContaining({ id: 'msg-1' })
+        })
+      )
     })
 
     it('should throw error for unauthenticated user', async () => {
@@ -280,7 +291,7 @@ describe('Chat Actions', () => {
           id: 'msg-1',
           chatId,
           role: 'user' as const,
-          metadata: {},
+          metadata: null,
           createdAt: new Date(),
           updatedAt: null
         }

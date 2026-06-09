@@ -2,11 +2,15 @@ import { tool, UIToolInvocation } from 'ai'
 
 import { fetchSchema } from '@/lib/schema/fetch'
 import { SearchResults as SearchResultsType } from '@/lib/types'
+import { isUrlSafeToFetch } from '@/lib/utils'
 
 const CONTENT_CHARACTER_LIMIT = 50000
 const TITLE_CHARACTER_LIMIT = 100
 
 async function fetchRegularData(url: string): Promise<SearchResultsType> {
+  if (!isUrlSafeToFetch(url)) {
+    throw new Error('URL is not allowed: private/internal IP addresses and non-HTTP schemes are blocked')
+  }
   try {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
@@ -162,6 +166,11 @@ export const fetchTool = tool({
     'Fetch content from any URL. By default uses "regular" type which performs fast, direct HTML fetching without external APIs - ideal for most websites. IMPORTANT: "regular" type does NOT support PDFs and will fail on PDF URLs. Use "api" type when you need: 1) PDF content extraction (required for .pdf URLs), 2) Complex JavaScript-rendered pages, 3) Better markdown formatting, 4) Table extraction. The "api" type requires Jina or Tavily API keys and uses Jina Reader if available, otherwise falls back to Tavily Extract.',
   inputSchema: fetchSchema,
   async *execute({ url, type = 'regular' }) {
+    // SSRF check applies to all fetch types
+    if (!isUrlSafeToFetch(url)) {
+      throw new Error('URL is not allowed: private/internal IP addresses and non-HTTP schemes are blocked')
+    }
+
     // Yield initial fetching state
     yield {
       state: 'fetching' as const,

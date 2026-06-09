@@ -74,11 +74,20 @@ export async function POST(req: Request) {
     }
 
     if (isGuest) {
+      // Take IP from the last entry in x-forwarded-for (appended by trusted proxy)
+      // rather than the first entry (client-controlled, spoofable)
       const forwardedFor = req.headers.get('x-forwarded-for') || ''
+      const forwardedParts = forwardedFor.split(',').map(s => s.trim())
       const ip =
-        forwardedFor.split(',')[0]?.trim() ||
+        forwardedParts[forwardedParts.length - 1] ||
         req.headers.get('x-real-ip') ||
         null
+
+      // Reject obviously invalid IPs
+      if (ip && !/^[0-9a-fA-F.:]+$/.test(ip)) {
+        return new Response('Invalid client IP', { status: 400 })
+      }
+
       const guestLimitResponse = await checkAndEnforceGuestLimit(ip)
       if (guestLimitResponse) return guestLimitResponse
     }

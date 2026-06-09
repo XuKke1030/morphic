@@ -44,17 +44,25 @@ export async function POST(req: Request) {
     // Flush to ensure the score is sent
     await langfuse.flushAsync()
 
-    // Get current user for RLS context
-    let userId: string | null = null
+    // Get current user for RLS context — require authentication
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
+    let userId: string | null = null
     if (supabaseUrl && supabaseAnonKey) {
       const supabase = await createClient()
       const {
         data: { user }
       } = await supabase.auth.getUser()
       userId = user?.id || null
+    }
+
+    // Reject feedback from unauthenticated users when auth is enabled
+    if (!userId && process.env.ENABLE_AUTH !== 'false') {
+      return new Response('Authentication required', {
+        status: 401,
+        statusText: 'Unauthorized'
+      })
     }
 
     // Update the message metadata with the feedback score using the action

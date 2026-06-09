@@ -10,6 +10,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   varchar
 } from 'drizzle-orm/pg-core'
 
@@ -55,8 +56,8 @@ export const chats = pgTable(
       as: 'permissive',
       for: 'all',
       to: 'public',
-      using: sql`user_id = current_setting('app.current_user_id', true)`,
-      withCheck: sql`user_id = current_setting('app.current_user_id', true)`
+      using: sql`user_id = current_setting('app.current_user_id', true) AND user_id != ''`,
+      withCheck: sql`user_id = current_setting('app.current_user_id', true) AND user_id != ''`
     }),
     pgPolicy('public_chats_readable', {
       as: 'permissive',
@@ -97,11 +98,13 @@ export const messages = pgTable(
         SELECT 1 FROM ${chats}
         WHERE ${chats}.id = chat_id
         AND ${chats}.user_id = current_setting('app.current_user_id', true)
+        AND ${chats}.user_id != ''
       )`,
       withCheck: sql`EXISTS (
         SELECT 1 FROM ${chats}
         WHERE ${chats}.id = chat_id
         AND ${chats}.user_id = current_setting('app.current_user_id', true)
+        AND ${chats}.user_id != ''
       )`
     }),
     pgPolicy('public_chat_messages_readable', {
@@ -203,6 +206,7 @@ export const parts = pgTable(
     // Indexes
     index('parts_message_id_idx').on(table.messageId),
     index('parts_message_id_order_idx').on(table.messageId, table.order),
+    uniqueIndex('parts_message_id_order_unique').on(table.messageId, table.order),
 
     // Constraints
     check('text_text_required', sql`(type != 'text' OR text_text IS NOT NULL)`),
@@ -233,12 +237,14 @@ export const parts = pgTable(
         INNER JOIN ${chats} ON ${chats}.id = ${messages}.chat_id
         WHERE ${messages}.id = message_id
         AND ${chats}.user_id = current_setting('app.current_user_id', true)
+        AND ${chats}.user_id != ''
       )`,
       withCheck: sql`EXISTS (
         SELECT 1 FROM ${messages}
         INNER JOIN ${chats} ON ${chats}.id = ${messages}.chat_id
         WHERE ${messages}.id = message_id
         AND ${chats}.user_id = current_setting('app.current_user_id', true)
+        AND ${chats}.user_id != ''
       )`
     }),
     pgPolicy('public_chat_parts_readable', {

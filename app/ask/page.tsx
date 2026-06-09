@@ -1,4 +1,4 @@
-import { AskNumberChat } from '@/components/ask-number-chat'
+import AskNumberChatDynamic from '@/components/ask-number-chat-dynamic'
 import { ChatDbLoginGate } from '@/components/chatdb-login-gate'
 
 export default function AskPage({
@@ -13,7 +13,7 @@ export default function AskPage({
 }) {
   return searchParams.then(params => (
     <ChatDbLoginGate mode="user">
-      <AskNumberChat
+      <AskNumberChatDynamic
         initialAlertId={Number(params.alertId || 0)}
         initialAutoAsk={params.autoAsk === '1'}
         initialQuestion={params.q || ''}

@@ -1,0 +1,17 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e7]
+      - generic [ref=e10]:
+        - heading "问数管理后台" [level=1] [ref=e11]
+        - paragraph [ref=e12]: 管理员登录后可维护权限、问题与数据接入
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - text: 账号
+        - textbox "账号" [ref=e15]
+      - generic [ref=e16]:
+        - text: 密码
+        - textbox "密码" [ref=e17]
+      - button "进入后台" [ref=e18] [cursor=pointer]
+  - region "Notifications alt+T"
+  - alert [ref=e19]

@@ -433,7 +433,7 @@ function compactChartLabel(label: string, maxLength = 7) {
   return `${value.slice(0, Math.max(maxLength - 1, 1))}…`
 }
 
-function splitChartLabel(label: string) {
+function splitChartLabel(label: string): string[] {
   const value = label.trim()
   if (value.length <= 5) return [value]
   // Prefer breaking at "/" or spaces
@@ -470,7 +470,7 @@ function applyChartTopN(labels: string[], series: ChartSeries[], topN: number | 
 }
 
 function buildChartSvgForCopy(payload: ChartPayload, topN?: number) {
-  const activeType = payload.type || 'line'
+  const activeType = payload.type === 'bar_rank' ? 'bar_rank' : payload.type === 'metric_card' ? 'metric_card' : (payload.type || 'line')
   const rawLabels = payload.x || payload.labels || []
   const rawSeries = payload.series?.filter(item => item.data?.length) || []
   const { labels, series } = applyChartTopN(rawLabels, rawSeries, topN)
@@ -865,8 +865,15 @@ async function copySvgAsPng(svgMarkup: string) {
 }
 
 function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }) {
+  // Map special types to standard toggle types
+  const mapToToggleType = (t?: string): ChartType => {
+    if (t === 'bar_rank') return 'bar'
+    if (t === 'metric_card') return 'table' // metric_card rendered separately
+    return (t as ChartType) || 'line'
+  }
+  const isSpecialType = payload.type === 'bar_rank' || payload.type === 'metric_card'
   const [activeType, setActiveType] = useState<ChartType>(
-    payload.type || 'line'
+    isSpecialType ? mapToToggleType(payload.type) : (payload.type as ChartType) || 'line'
   )
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>(
     'idle'
@@ -949,6 +956,8 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
           {chartTypeOptions.map(option => {
             const Icon = option.icon
             const selected = activeType === option.type
+                || (payload.type === 'bar_rank' && option.type === 'bar' && activeType === 'bar')
+                || (payload.type === 'metric_card' && option.type === 'table' && activeType === 'table')
             return (
               <button
                 key={option.type}
@@ -969,7 +978,7 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
         </div>
       </div>
 
-      {activeType === 'table' ? (
+      {(activeType === 'table' && payload.type !== 'metric_card') ? (
         <div className="overflow-x-auto rounded-lg border border-[#eef2f7]">
           <table className="min-w-full border-collapse text-left text-xs">
             <thead className="bg-[#f8fafc] text-[#6b7280]">
@@ -1065,7 +1074,7 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
             })}
           </div>
         </div>
-      ) : activeType === 'bar_rank' && series.length ? (
+      ) : (activeType === 'bar_rank' || (payload.type === 'bar_rank' && activeType === 'bar')) && series.length ? (
         <div className="overflow-x-auto">
           <svg
             className="min-w-[360px]"
@@ -1113,7 +1122,7 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
             })}
           </svg>
         </div>
-      ) : activeType === 'metric_card' && tableRows.length ? (
+      ) : (activeType === 'metric_card' || (payload.type === 'metric_card' && activeType === 'table')) && tableRows.length ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {tableRows.map((row, index) => {
             const label = String(row[0] ?? '')
@@ -1325,7 +1334,7 @@ function ChatDbChart({ payload, topN }: { payload: ChartPayload; topN?: number }
                   fill="#6b7280"
                 >
                   <title>{label}</title>
-                  {lines.map((line, lineIndex) => (
+                  {lines.map((line: string, lineIndex: number) => (
                     <tspan key={lineIndex} x={x} dy={lineIndex === 0 ? 0 : 13}>
                       {line}
                     </tspan>
@@ -1672,9 +1681,9 @@ function AssistantContent({
             </section>
           )
         })}
-        {elapsedMs != null && (
+        {elapsedMs != null && !blocks.some(b => b.type === 'clarify') && (
           <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
-            <span>数据来源：{tables ? tables.split(",").join("、") : '数据表'}</span>
+            {tables && <span>数据来源：{tables.split(",").join("、")}</span>}
             <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
           </div>
         )}
@@ -1703,9 +1712,9 @@ function AssistantContent({
           </Streamdown>
         )
       })}
-      {elapsedMs != null && (
+      {elapsedMs != null && !blocks.some(b => b.type === 'clarify') && (
         <div className="mt-2 flex items-center justify-between border-t border-[#eee] px-1 pt-2 text-[11px] text-[#9ca3af]">
-          <span>数据来源：{tables ? tables.split(",").join("、") : '数据表'}</span>
+          {tables && <span>数据来源：{tables.split(",").join("、")}</span>}
           <span>回答耗时 {(elapsedMs / 1000).toFixed(1)}s</span>
         </div>
       )}
@@ -2491,9 +2500,10 @@ export function AskNumberChat({
         const next = [...prev]
         const last = next[next.length - 1]
         if (last?.role === 'assistant' && last.metadata?.startTime) {
+          const tables = last.metadata.tables || prev.slice(0, -1).reverse().find(m => m.role === 'assistant' && m.metadata?.tables)?.metadata?.tables
           next[next.length - 1] = {
             ...last,
-            metadata: { ...last.metadata, elapsedMs: Date.now() - last.metadata.startTime }
+            metadata: { ...last.metadata, elapsedMs: Date.now() - last.metadata.startTime, tables }
           }
         }
         return next

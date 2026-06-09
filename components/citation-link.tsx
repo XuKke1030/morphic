@@ -29,6 +29,16 @@ const getHostname = (url: string): string => {
   }
 }
 
+// Only allow http/https hrefs to prevent javascript: scheme XSS
+const isHrefSafe = (href: string): boolean => {
+  try {
+    const parsed = new URL(href)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export const CitationLink = memo(function CitationLink({
   href,
   children,
@@ -51,7 +61,7 @@ export const CitationLink = memo(function CitationLink({
   if (!citationData) {
     return (
       <a
-        href={href}
+        href={isHrefSafe(href) ? href : '#'}
         target="_blank"
         rel="noopener noreferrer"
         className={linkClasses}
@@ -67,7 +77,7 @@ export const CitationLink = memo(function CitationLink({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <a
-            href={href}
+            href={isHrefSafe(href) ? href : '#'}
             target="_blank"
             rel="noopener noreferrer"
             className={linkClasses}
@@ -125,7 +135,7 @@ export const CitationLink = memo(function CitationLink({
   // For non-numbered citations, render as regular link
   return (
     <a
-      href={href}
+      href={isHrefSafe(href) ? href : '#'}
       target="_blank"
       rel="noopener noreferrer"
       className={linkClasses}

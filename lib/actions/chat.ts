@@ -95,7 +95,7 @@ export async function createChat(
 }
 
 /**
- * Create a new chat and save the first message (public API with auth)
+ * Create a new chat and save the first message in a single atomic transaction
  */
 export async function createChatAndSaveMessage(
   message: UIMessage,
@@ -113,25 +113,22 @@ export async function createChatAndSaveMessage(
   const chatTitle =
     title || getTextFromParts(message.parts as any[]) || DEFAULT_CHAT_TITLE
 
-  // Create chat
-  const chat = await dbActions.createChat({
-    id: chatId,
-    title: chatTitle.substring(0, 255),
+  // Create chat and message in a single atomic transaction
+  const result = await dbActions.createChatWithFirstMessageTransaction({
+    chatId,
+    chatTitle: chatTitle.substring(0, 255),
     userId,
-    visibility: 'private'
-  })
-
-  // Save message
-  const dbMessage = await dbActions.upsertMessage({
-    ...message,
-    id: messageId,
-    chatId
+    message: {
+      ...message,
+      id: messageId,
+      chatId
+    }
   })
 
   // Revalidate cache
   revalidateTag(`chat-${chatId}`, 'max')
 
-  return { chat, message: dbMessage }
+  return result
 }
 
 /**
