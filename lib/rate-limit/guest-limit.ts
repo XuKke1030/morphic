@@ -2,6 +2,38 @@ import { Redis } from '@upstash/redis'
 
 const DEFAULT_GUEST_DAILY_LIMIT = 10
 
+// Module-level singleton Redis client
+let redisInstance: Redis | null = null
+
+function getRedis(): Redis | null {
+  if (
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
+    return null
+  }
+  if (!redisInstance) {
+    redisInstance = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN
+    })
+  }
+  return redisInstance
+}
+
+/**
+ * Atomic increment with TTL using a Lua script.
+ * Prevents the race condition where a process crashes between incr and expire,
+ * leaving a key with no TTL that never expires.
+ */
+const INCR_WITH_EXPIRE_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`
+
 function getGuestDailyLimit(): number {
   const raw = process.env.GUEST_CHAT_DAILY_LIMIT
   const parsed = raw ? Number(raw) : DEFAULT_GUEST_DAILY_LIMIT
@@ -35,32 +67,22 @@ async function checkGuestLimit(ip: string): Promise<{
     return { allowed: true, remaining: Infinity, resetAt: 0, limit: 0 }
   }
 
-  if (
-    !process.env.UPSTASH_REDIS_REST_URL ||
-    !process.env.UPSTASH_REDIS_REST_TOKEN
-  ) {
+  const redis = getRedis()
+  if (!redis) {
     return { allowed: true, remaining: Infinity, resetAt: 0, limit: 0 }
   }
 
   try {
-    const redis = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN
-    })
-
     const dateKey = new Date().toISOString().split('T')[0]
     const key = `rl:guest:chat:${ip}:${dateKey}`
+    const secondsUntilMidnight = getSecondsUntilMidnight()
+
     const count = await Promise.race([
-      redis.incr(key),
+      redis.eval(INCR_WITH_EXPIRE_SCRIPT, [key], [String(secondsUntilMidnight)]) as Promise<number>,
       new Promise<number>((_, reject) =>
         setTimeout(() => reject(new Error('Redis timeout')), 3000)
       )
     ])
-
-    if (count === 1) {
-      const secondsUntilMidnight = getSecondsUntilMidnight()
-      await redis.expire(key, secondsUntilMidnight)
-    }
 
     const limit = getGuestDailyLimit()
     const remaining = Math.max(0, limit - count)

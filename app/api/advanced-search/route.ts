@@ -13,6 +13,7 @@ import {
   SearXNGResult,
   SearXNGSearchResults
 } from '@/lib/types'
+import { isUrlSafeToFetch } from '@/lib/utils'
 
 /**
  * Maximum number of results to fetch from SearXNG.
@@ -314,6 +315,12 @@ async function crawlPage(
   result: SearXNGResult,
   query: string
 ): Promise<SearXNGResult> {
+  if (!isUrlSafeToFetch(result.url)) {
+    return {
+      ...result,
+      content: result.content || 'Content unavailable: URL points to a private/internal address.'
+    }
+  }
   try {
     const html = await fetchHtmlWithTimeout(result.url, 20000)
 
@@ -600,6 +607,9 @@ async function fetchHtmlWithTimeout(
 }
 
 function fetchHtml(url: string): Promise<string> {
+  if (!isUrlSafeToFetch(url)) {
+    return Promise.resolve('<html><body>Content unavailable: URL points to a private/internal address.</body></html>')
+  }
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https:') ? https : http
     const agent = url.startsWith('https:') ? httpsAgent : httpAgent

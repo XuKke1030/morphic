@@ -1,7 +1,7 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
   devIndicators: false,
-  allowedDevOrigins: ['127.0.0.1'],
+  allowedDevOrigins: ['127.0.0.1','192.168.85.1','172.20.10.2'],
   turbopack: {
     resolveAlias: {
       canvas: './empty-module.ts'

@@ -1,1 +1,13 @@
-#https://docs.searxng.org/admin/searx.limiter.html
+# SearXNG rate limiter configuration
+# https://docs.searxng.org/admin/searx.limiter.html
+
+[botdetection.ip_limit]
+# Number of requests allowed per IP in the link_token window
+link_token = 10
+
+[botdetection.ip_lists]
+pass_ip = []
+block_ip = []
+
+[botdetection.ip_rate_limit]
+window = 3600

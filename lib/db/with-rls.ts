@@ -40,6 +40,9 @@ export async function withRLS<T>(
   userId: string,
   callback: (tx: TxInstance) => Promise<T>
 ): Promise<T> {
+  if (!userId || userId.trim() === '') {
+    throw new Error('withRLS requires a non-empty userId to enforce Row-Level Security')
+  }
   try {
     return await db.transaction(async tx => {
       // Set the user ID for this transaction

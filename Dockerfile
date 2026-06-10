@@ -16,6 +16,13 @@ RUN npx next telemetry disable
 ENV DATABASE_URL=postgresql://user:pass@localhost:5432/db
 RUN npm run build
 
+# Production dependencies stage — only install production deps for smaller image
+FROM node:22-slim AS prod-deps
+WORKDIR /app
+RUN npm install -g bun
+COPY package.json bun.lock ./
+RUN bun install --production
+
 # Runtime stage
 FROM node:22-slim AS runner
 WORKDIR /app
@@ -28,7 +35,9 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/bun.lock ./bun.lock
-COPY --from=builder /app/node_modules ./node_modules
+
+# Copy production-only node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Copy migration files and scripts
 COPY --from=builder /app/drizzle ./drizzle

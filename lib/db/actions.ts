@@ -103,7 +103,11 @@ export async function upsertMessage(
       .values(messageData)
       .onConflictDoUpdate({
         target: messages.id,
-        set: { role: messageData.role }
+        set: {
+          role: messageData.role,
+          metadata: messageData.metadata,
+          updatedAt: new Date()
+        }
       })
       .returning()
 
@@ -345,27 +349,38 @@ export async function deleteChat(
 }
 
 /**
- * Update chat visibility
+ * Update chat visibility (atomic ownership check + update in single transaction)
  */
 export async function updateChatVisibility(
   chatId: string,
   userId: string,
   visibility: 'public' | 'private'
 ): Promise<Chat | null> {
-  return withRLS(userId, async tx => {
-    const chat = await getChat(chatId, userId)
-    if (!chat || chat.userId !== userId) {
-      return null
-    }
+  try {
+    return withRLS(userId, async tx => {
+      // Ownership check and update in the same transaction to prevent TOCTOU
+      const [chat] = await tx
+        .select()
+        .from(chats)
+        .where(eq(chats.id, chatId))
+        .limit(1)
 
-    const [updatedChat] = await tx
-      .update(chats)
-      .set({ visibility })
-      .where(eq(chats.id, chatId))
-      .returning()
+      if (!chat || chat.userId !== userId) {
+        return null
+      }
 
-    return updatedChat
-  })
+      const [updatedChat] = await tx
+        .update(chats)
+        .set({ visibility })
+        .where(eq(chats.id, chatId))
+        .returning()
+
+      return updatedChat
+    })
+  } catch (error) {
+    console.error('Error updating chat visibility:', error)
+    return null
+  }
 }
 
 /**

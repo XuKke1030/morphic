@@ -1,3 +1,4 @@
+import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 import nextVitals from 'eslint-config-next/core-web-vitals'
 import simpleImportSort from 'eslint-plugin-simple-import-sort'
@@ -22,6 +23,7 @@ const importSortGroups = [
 
 export default defineConfig([
   ...nextVitals,
+  ...tseslint.configs.recommended,
   {
     plugins: {
       'simple-import-sort': simpleImportSort
@@ -33,7 +35,13 @@ export default defineConfig([
           groups: importSortGroups
         }
       ],
-      'simple-import-sort/exports': 'error'
+      'simple-import-sort/exports': 'error',
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off'
     }
   },
   globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts'])

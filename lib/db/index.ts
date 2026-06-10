@@ -43,6 +43,18 @@ if (isDevelopment) {
   )
 }
 
+// Warn when RLS is not enforced -- this is a security concern
+if (!process.env.DATABASE_RESTRICTED_URL && !isTest) {
+  console.warn(
+    '\n' +
+    '⚠️  SECURITY WARNING: DATABASE_RESTRICTED_URL is not configured.\n' +
+    '   The application is connecting as the database owner, which BYPASSES\n' +
+    '   all Row-Level Security (RLS) policies. Any user can access any row.\n' +
+    '   To enforce RLS, create a restricted database role and set\n' +
+    '   DATABASE_RESTRICTED_URL in your environment variables.\n'
+  )
+}
+
 // SSL configuration: Use environment variable to control SSL
 // DATABASE_SSL_DISABLED=true disables SSL completely (for local/Docker PostgreSQL)
 // Default is to enable SSL with certificate verification (for cloud databases like Neon, Supabase)
@@ -54,7 +66,10 @@ const sslConfig =
 const client = postgres(connectionString, {
   ssl: sslConfig,
   prepare: false,
-  max: 20 // Max 20 connections
+  max: 20, // Max 20 connections
+  idle_timeout: 20, // Close idle connections after 20 seconds
+  connect_timeout: 10, // Fail if connection takes more than 10 seconds
+  max_lifetime: 60 * 30 // Recycle connections after 30 minutes
 })
 
 export const db = drizzle(client, {

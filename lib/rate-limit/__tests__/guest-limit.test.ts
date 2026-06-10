@@ -2,20 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { checkAndEnforceGuestLimit } from '@/lib/rate-limit/guest-limit'
 
-const mockRedisIncr = vi.fn()
-const mockRedisExpire = vi.fn()
+const mockRedisEval = vi.fn()
 
 vi.mock('@upstash/redis', () => ({
   Redis: vi.fn().mockImplementation(() => ({
-    incr: mockRedisIncr,
-    expire: mockRedisExpire
+    eval: mockRedisEval
   }))
 }))
 
 describe('checkAndEnforceGuestLimit', () => {
   beforeEach(() => {
-    mockRedisIncr.mockReset()
-    mockRedisExpire.mockReset()
+    mockRedisEval.mockReset()
     process.env.MORPHIC_CLOUD_DEPLOYMENT = 'true'
     process.env.UPSTASH_REDIS_REST_URL = 'https://example.com'
     process.env.UPSTASH_REDIS_REST_TOKEN = 'token'
@@ -28,8 +25,7 @@ describe('checkAndEnforceGuestLimit', () => {
   })
 
   it('returns 401 when over the default limit', async () => {
-    mockRedisIncr.mockResolvedValue(11)
-    mockRedisExpire.mockResolvedValue(1)
+    mockRedisEval.mockResolvedValue(11)
 
     const response = await checkAndEnforceGuestLimit('1.2.3.4')
     expect(response).not.toBeNull()
@@ -41,8 +37,7 @@ describe('checkAndEnforceGuestLimit', () => {
 
   it('uses configured limit when set', async () => {
     process.env.GUEST_CHAT_DAILY_LIMIT = '5'
-    mockRedisIncr.mockResolvedValue(6)
-    mockRedisExpire.mockResolvedValue(1)
+    mockRedisEval.mockResolvedValue(6)
 
     const response = await checkAndEnforceGuestLimit('5.6.7.8')
     expect(response).not.toBeNull()
@@ -52,10 +47,21 @@ describe('checkAndEnforceGuestLimit', () => {
   })
 
   it('allows request under the limit', async () => {
-    mockRedisIncr.mockResolvedValue(3)
-    mockRedisExpire.mockResolvedValue(1)
+    mockRedisEval.mockResolvedValue(3)
 
     const response = await checkAndEnforceGuestLimit('9.9.9.9')
     expect(response).toBeNull()
+  })
+
+  it('calls redis eval with the Lua script', async () => {
+    mockRedisEval.mockResolvedValue(1)
+
+    await checkAndEnforceGuestLimit('10.0.0.1')
+
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining('INCR'),
+      expect.arrayContaining([expect.stringContaining('rl:guest:chat:10.0.0.1')]),
+      expect.arrayContaining([expect.any(String)])
+    )
   })
 })

@@ -43,9 +43,19 @@ export function Citing({
     }
   }
 
+  const safeHref = (() => {
+    if (!href || href === '#') return '#'
+    try {
+      const parsed = new URL(href)
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? href : '#'
+    } catch {
+      return '#'
+    }
+  })()
+
   return (
     <CitationLink
-      href={href || '#'}
+      href={safeHref}
       className={className}
       citationData={citationData}
       {...props}
