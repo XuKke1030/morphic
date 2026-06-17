@@ -24,7 +24,10 @@ export function AppShell({
   const [mounted, setMounted] = useState(false)
   const pathname = usePathname()
   const isQuestionPlatform =
-    pathname === '/' || pathname === '/ask' || pathname === '/qa' || pathname?.startsWith('/admin')
+    pathname === '/' ||
+    pathname === '/ask' ||
+    pathname === '/qa' ||
+    pathname?.startsWith('/admin')
 
   useEffect(() => {
     const id = window.setTimeout(() => setMounted(true), 0)
@@ -32,7 +35,9 @@ export function AppShell({
   }, [])
 
   if (!mounted || isQuestionPlatform) {
-    return <div className="h-full min-h-0 w-full overflow-hidden">{children}</div>
+    return (
+      <div className="h-dvh min-h-0 w-full overflow-hidden">{children}</div>
+    )
   }
 
   return (
@@ -48,4 +53,3 @@ export function AppShell({
     </SidebarProvider>
   )
 }
-

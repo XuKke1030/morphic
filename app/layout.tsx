@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 
 import { getCurrentUserId } from '@/lib/auth/get-current-user'
+import { ChatDbAuthProvider } from '@/lib/contexts/chatdb-auth-context'
 import { UserProvider } from '@/lib/contexts/user-context'
 import { createClient } from '@/lib/supabase/server'
 import { cn } from '@/lib/utils'
@@ -36,7 +37,8 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   minimumScale: 1,
-  maximumScale: 1
+  maximumScale: 1,
+  viewportFit: 'cover'
 }
 
 export default async function RootLayout({
@@ -59,9 +61,11 @@ export default async function RootLayout({
   const userId = user?.id ?? (await getCurrentUserId())
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <body
-        className={cn('fixed inset-0 flex flex-col font-sans antialiased overflow-hidden')}
+        className={cn(
+          'h-full flex flex-col font-sans antialiased overflow-hidden'
+        )}
       >
         <ThemeProvider
           attribute="class"
@@ -70,9 +74,11 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <UserProvider hasUser={!!userId}>
-            <AppShell user={user} hasUser={!!userId}>
-              {children}
-            </AppShell>
+            <ChatDbAuthProvider>
+              <AppShell user={user} hasUser={!!userId}>
+                {children}
+              </AppShell>
+            </ChatDbAuthProvider>
           </UserProvider>
           <Toaster />
         </ThemeProvider>

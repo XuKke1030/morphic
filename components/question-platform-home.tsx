@@ -5,6 +5,9 @@ import Link from 'next/link'
 
 import { LogOut, UserRound } from 'lucide-react'
 
+import { useChatDbAuth } from '@/lib/contexts/chatdb-auth-context'
+import { useVisualViewport } from '@/hooks/use-visual-viewport'
+
 type Topic = {
   code?: string
   label: string
@@ -46,6 +49,8 @@ function topicLabel(topic: Topic) {
 }
 
 export function QuestionPlatformHome() {
+  const { username, logout: authLogout } = useChatDbAuth()
+  const { height: vvHeight, offsetTop: vvOffsetTop } = useVisualViewport()
   const [topics, setTopics] = useState<Topic[]>([])
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [loadingTopics, setLoadingTopics] = useState(true)
@@ -53,40 +58,47 @@ export function QuestionPlatformHome() {
   const [userName, setUserName] = useState('用户')
   const [profileOpen, setProfileOpen] = useState(false)
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null)
-  const [exampleQuestions, setExampleQuestions] = useState<ExampleQuestion[]>([])
+  const [exampleQuestions, setExampleQuestions] = useState<ExampleQuestion[]>(
+    []
+  )
   const profileRef = useRef<HTMLDivElement>(null)
   const topicQuery = topics.map(topic => topicCode(topic)).join(',')
 
   useEffect(() => {
-    queueMicrotask(() => {
-      const storedName = window.localStorage.getItem('chatdb_user_name')
-      if (storedName) {
-        setUserName(storedName)
-      }
-    })
-  }, [])
+    if (username) setUserName(username)
+  }, [username])
 
   useEffect(() => {
     let active = true
-    fetch('/api/chatdb/user/bootstrap', { cache: 'no-store', credentials: 'include' })
+    fetch('/api/chatdb/user/bootstrap', {
+      cache: 'no-store',
+      credentials: 'include'
+    })
       .then(r => r.json())
       .then(json => {
         if (active && json?.data) setBootstrap(json.data)
       })
       .catch(() => {})
-    return () => { active = false }
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
     let active = true
-    fetch('/api/chatdb/example-questions', { cache: 'no-store', credentials: 'include' })
+    fetch('/api/chatdb/example-questions', {
+      cache: 'no-store',
+      credentials: 'include'
+    })
       .then(r => r.json())
       .then(json => {
         const list = json?.data?.list || json?.list || []
         if (active && Array.isArray(list)) setExampleQuestions(list.slice(0, 6))
       })
       .catch(() => {})
-    return () => { active = false }
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
@@ -189,18 +201,18 @@ export function QuestionPlatformHome() {
   }
 
   const logout = async () => {
-    await fetch('/api/chatdb/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined)
-    window.localStorage.removeItem('chatdb_user_login')
-    window.localStorage.removeItem('chatdb_user_name')
-    window.location.reload()
+    await authLogout('user')
   }
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]">
+    <div
+      className="w-full overflow-y-auto bg-[#f7f7f7] text-[#111827]"
+      style={{ marginTop: vvOffsetTop ? `${vvOffsetTop}px` : 0, height: vvHeight ? `${vvHeight}px` : '100%' }}
+    >
       <div className="mx-auto min-h-full max-w-[560px] bg-white">
-        <header className="flex h-[90px] items-center justify-between border-b border-[#eeeeee] px-8">
-          <h1 className="text-[28px] font-bold tracking-normal">
-            问答问数平台
+        <header className="flex h-auto min-h-[56px] items-center justify-between border-b border-[#eeeeee] px-5 py-3">
+          <h1 className="whitespace-nowrap text-lg font-bold tracking-normal sm:text-xl">
+            问数平台
           </h1>
           <div ref={profileRef} className="relative">
             <button
@@ -237,17 +249,17 @@ export function QuestionPlatformHome() {
           </div>
         </header>
 
-        <main className="px-8 pt-12">
+        <main className="px-5 pt-6">
           <section>
-            <h2 className="text-[38px] font-extrabold leading-tight tracking-normal">
+            <h2 className="text-2xl font-extrabold leading-tight tracking-normal">
               {bootstrap?.welcomeMessage || `您好，${userName}`}
             </h2>
-            <p className="mt-5 text-[20px] text-[#8b8f99]">
+            <p className="mt-3 text-base text-[#8b8f99]">
               {bootstrap?.welcomeSubtext || '请选择业务主题'}
             </p>
 
             <div
-              className="mt-12 grid gap-3"
+              className="mt-6 grid gap-3"
               style={{
                 gridTemplateColumns: `repeat(${Math.max(Math.min(topics.length, 3), 1)}, minmax(0, 1fr))`
               }}
@@ -256,7 +268,7 @@ export function QuestionPlatformHome() {
                 <Link
                   key={topic.value}
                   href={`/ask?topic=${topicCode(topic)}`}
-                  className="flex h-[74px] items-center justify-center rounded-[13px] border border-[#e8e8e8] bg-white text-[22px] font-semibold shadow-[0_1px_8px_rgba(0,0,0,0.02)] transition hover:border-[#b8b8b8] hover:bg-[#fafafa]"
+                  className="flex h-14 items-center justify-center rounded-xl border border-[#e8e8e8] bg-white text-base font-semibold shadow-[0_2px_8px_rgba(0,0,0,0.10),0_1px_3px_rgba(0,0,0,0.06)] transition hover:shadow-[0_4px_14px_rgba(0,0,0,0.14),0_2px_6px_rgba(0,0,0,0.08)] hover:border-[#d0d0d0] active:shadow-[0_1px_4px_rgba(0,0,0,0.08)] active:translate-y-[1px]"
                 >
                   {topicLabel(topic)}
                 </Link>
@@ -279,14 +291,17 @@ export function QuestionPlatformHome() {
             */}
 
             {exampleQuestions.length > 0 ? (
-              <div className="mt-8">
-                <h3 className="text-[16px] font-medium text-[#9aa0aa]">试试这样问</h3>
-                <div className="mt-3 space-y-2">
+              <div className="mt-5">
+                <h3 className="text-[16px] font-medium text-[#9aa0aa]">
+                  试试这样问
+                </h3>
+                <div className="mt-2 space-y-1.5">
                   {exampleQuestions.map(eq => {
                     const topic = topics.find(t => topicCode(t) === eq.topic)
-                    const href = eq.topic === 'qa'
-                      ? `/ask?topic=grid&q=${encodeURIComponent(eq.question)}`
-                      : `/ask?topic=${eq.topic || ''}&q=${encodeURIComponent(eq.question)}`
+                    const href =
+                      eq.topic === 'qa'
+                        ? `/ask?topic=grid&q=${encodeURIComponent(eq.question)}`
+                        : `/ask?topic=${eq.topic || ''}&q=${encodeURIComponent(eq.question)}`
                     return (
                       <Link
                         key={eq.id}
@@ -302,29 +317,29 @@ export function QuestionPlatformHome() {
             ) : null}
           </section>
 
-          <section className="mt-16">
-            <h3 className="text-[20px] font-normal text-[#9aa0aa]">实时告警</h3>
+          <section className="mt-8 pb-8">
+            <h3 className="text-[16px] font-normal text-[#9aa0aa]">实时告警</h3>
 
-            <div className="mt-5 space-y-4">
+            <div className="mt-3 space-y-2">
               {alerts.map(alert => (
                 <Link
                   key={alert.id}
                   href={`/ask?topic=${alert.topic}&alertId=${alert.id}&autoAsk=1&q=${encodeURIComponent(alert.question || alert.content)}`}
-                  className="group flex min-h-[98px] items-center rounded-[13px] border border-[#ffcfc5] bg-[#fff8f6] px-7 text-left"
+                  className="group flex items-center rounded-xl border border-[#ffcfc5] bg-[#fff8f6] px-4 py-3 text-left"
                 >
-                  <span className="mr-4 h-[55px] w-1 rounded-full bg-[#ff784f]" />
+                  <span className="mr-3 h-10 w-0.5 rounded-full bg-[#ff784f]" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[17px] text-[#ff5f3d]">
-                      {alert.displayTimeText || '刚刚'}
-                    </span>
-                    <span className="mt-2 block truncate text-[18px] text-[#333]">
+                    <span className="block truncate text-base text-[#333]">
                       {alert.title || alert.content}
                     </span>
+                  </span>
+                  <span className="ml-3 shrink-0 text-xs text-[#ff5f3d]">
+                    {alert.displayTimeText || '刚刚'}
                   </span>
                   <button
                     type="button"
                     aria-label="关闭告警"
-                    className="mr-5 text-[22px] leading-none text-[#ff8b72]"
+                    className="ml-3 text-lg leading-none text-[#ff8b72]"
                     onClick={event => {
                       event.preventDefault()
                       dismissAlert(alert.id)
@@ -332,7 +347,7 @@ export function QuestionPlatformHome() {
                   >
                     ×
                   </button>
-                  <span className="text-[24px] text-[#ff8b72] transition group-hover:translate-x-1">
+                  <span className="ml-2 text-xl text-[#ff8b72] transition group-hover:translate-x-1">
                     ›
                   </span>
                 </Link>

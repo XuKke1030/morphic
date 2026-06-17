@@ -432,6 +432,12 @@
   }
   body {
     @apply bg-background text-foreground;
+    overscroll-behavior: none;
+  }
+
+  [class*="overflow-y-auto"],
+  [class*="overflow-y-scroll"] {
+    overscroll-behavior-y: contain;
   }
 
   /* Tailwind v4: Restore pointer cursor for buttons */
